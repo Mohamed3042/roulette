@@ -37,18 +37,18 @@ export const ROOMS = {
   study: {
     name: 'The Study', blurb: 'Lamplight, green leather', sleeve: '#2c3b30', cuff: '#ece6da',
     target: { u: 0.5265, v: 0.2865, w: 0.0995, h: 0.161, shape: 'square' },
-    key: { color: 0xffd6ac, intensity: 3.2, pos: [-0.9, 0.35, -0.9] },
+    key: { color: 0xffd6ac, intensity: 2.4, pos: [-0.8, 1.0, -0.55] },
     rim: { color: 0xffcf9a, intensity: 0.8, pos: [0.8, 0.5, -1.8] },
-    hemi: [0x8a8f98, 0x2a1c12, 0.45], env: 1.6, shadow: 0.55,
+    hemi: [0x8a8f98, 0x2a1c12, 0.45], env: 1.9, shadow: 0.55,
     lamps: [{ d: [-0.75, 0.25, -0.6], c: 0xfff0dc, i: 10, s: 0.5 }, { d: [-0.15, 0.55, -1], c: 0xffe2b8, i: 7, s: 0.35 }, { d: [0.3, 0.55, -1], c: 0xffe2b8, i: 7, s: 0.35 }, { d: [0.5, 0.8, 1], c: 0xf2efe8, i: 0.9, s: 1 }],
     grade: { vignette: 0.42, grain: 0.04, tint: [1.02, 1.0, 0.97] },
   },
   salon: {
     name: 'The Salon', blurb: 'Velvet, whisky, night', sleeve: '#3b2a22', cuff: '#efe9de',
     target: { u: 0.4995, v: 0.1895, w: 0.1255, h: 0.1885, shape: 'round' },
-    key: { color: 0xffcf9e, intensity: 3.0, pos: [-0.95, 0.35, -0.9] },
+    key: { color: 0xffcf9e, intensity: 2.3, pos: [-0.85, 1.0, -0.55] },
     rim: { color: 0xff8a6a, intensity: 0.8, pos: [0.4, 0.4, -2.2] },
-    hemi: [0x8a5a54, 0x1c0c0a, 0.4], env: 1.5, shadow: 0.6,
+    hemi: [0x8a5a54, 0x1c0c0a, 0.4], env: 1.8, shadow: 0.6,
     lamps: [{ d: [-0.8, 0.2, -0.6], c: 0xfff0dc, i: 10, s: 0.5 }, { d: [-0.45, 0.6, -1], c: 0xffdcae, i: 6, s: 0.3 }, { d: [0.6, 0.55, -1], c: 0xffdcae, i: 6, s: 0.3 }, { d: [0.5, 0.8, 1], c: 0xf2ebe4, i: 0.8, s: 1 }],
     grade: { vignette: 0.48, grain: 0.045, tint: [1.03, 0.99, 0.96] },
   },
@@ -164,8 +164,8 @@ let hands = null;
 
 // ---------- Poses (camera space, metres / radians; x is mirrored for left-handers) ----------
 const FOV = { hip: 50, ads: 34, hipP: 60, adsP: 44 };
-const HIP = { land: { x: 0.125, y: -0.092, z: -0.31 }, port: { x: 0.036, y: -0.085, z: -0.31 }, rz: -0.12 };
-const ADS_EYE = { land: 0.42, port: 0.38 };
+const HIP = { land: { x: 0.108, y: -0.084, z: -0.27 }, port: { x: 0.046, y: -0.098, z: -0.36 }, rz: -0.12 };
+const ADS_EYE = { land: 0.42, port: 0.46 };
 // Action poses (absolute): the open-cylinder read (close, from behind, like a macro shot), inspect.
 const LOAD = { land: { x: 0.03, y: -0.045, z: -0.17, rx: 0.42, ry: 0.36, rz: -0.95 }, port: { x: 0.012, y: -0.03, z: -0.19, rx: 0.42, ry: 0.36, rz: -0.95 } };
 const P = { ads: 0, act: 0, twirl: 0, crane: 0, hammer: 0, trig: 0, grip: 1, thumb: 0 };
@@ -296,14 +296,14 @@ async function fire() {
   } else {
     sound.shot(); buzz([40, 30, 70]);
     if (S.slowmo && !reduced) slowmo(0.22, 0.28, 0.5);
-    fx.muzzleFlash(gun.muzzle, 1.15); fx.gap(gun.gap, 1);
+    const fl = 1 - P.ads * 0.6; fx.muzzleFlash(gun.muzzle, 1.1 * fl); fx.gap(gun.gap, fl);
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(gun.muzzle.getWorldQuaternion(new THREE.Quaternion()));
     fx.smoke(gun.muzzle, fwd, 14, 0.8);
     fx.smoke(gun.gap, new THREE.Vector3(0, 0.5, 0), 6, 0.2);
     gun.setFired(pick, true);
     rec.vr += reduced ? 2 : 11; rec.vz += reduced ? 0.2 : 1.2; rec.vroll += reduced ? 0.5 : 4; kick.vp += reduced ? 0.3 : 3;
     shake = reduced ? 0.05 : 0.5;
-    grade.uniforms.uFlash.value = 0.5; plateU.uFlash.value = 0.45;
+    grade.uniforms.uFlash.value = 0.32; plateU.uFlash.value = 0.4;
     crossKick();
     to({ trig: 0, duration: 0.22, delay: 0.08 });
     await wait(0.03);
@@ -694,7 +694,7 @@ function getPlate(id) {
 function buildEnv(img, r) {
   const W = 1024, H = 512, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const g = cv.getContext('2d'), q = W / 4, y0 = H * 0.22, h = H * 0.6;
-  if ('filter' in g) g.filter = 'saturate(0.55)';
+  if ('filter' in g) g.filter = 'saturate(0.35)';
   const draw = (cx, flip, alpha) => { g.save(); g.globalAlpha = alpha; g.translate(cx, 0); g.scale(flip ? -1 : 1, 1); g.drawImage(img, -q * 0.75, y0, q * 1.5, h); g.restore(); };
   g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
   draw(W * 0.75, true, 0.7); draw(0, true, 0.55); draw(W, true, 0.55); draw(W * 0.5, false, 0.55); draw(W * 0.25, false, 1);
@@ -896,7 +896,7 @@ function update(dt, t, raw) {
     ['pinky', 'ring', 'middle', 'index'].forEach((f, i) => { const ph = (drum - i * 0.11) / 0.22; if (ph > 0 && ph < 1 && !reduced) poseL[f][0] -= Math.sin(ph * Math.PI) * 0.45; });
     left.apply(poseL);
     scene.updateMatrixWorld();
-    const fore = tmpV.set(0, 0, 1).transformDirection(right.wrist.matrixWorld).add(new THREE.Vector3().copy(ELBOW_R).multiply(new THREE.Vector3(mir.scale.x, 1, 1)).applyQuaternion(camera.getWorldQuaternion(tmpQ))).normalize();
+    const fore = tmpV.set(0, 0, 1).transformDirection(right.wrist.matrixWorld).add(new THREE.Vector3().copy(ELBOW_R).add(new THREE.Vector3(0.06 * P.ads, -0.4 * P.ads, 0)).multiply(new THREE.Vector3(mir.scale.x, 1, 1)).applyQuaternion(camera.getWorldQuaternion(tmpQ))).normalize();
     right.aimSleeve(right.wrist.getWorldPosition(new THREE.Vector3()).addScaledVector(fore, 0.3));
     left.aimSleeve(lmir.localToWorld(elbowNow.clone()));
   }

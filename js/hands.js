@@ -167,6 +167,9 @@ class Hand {
     const cuffMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.0375, 0.034, 0.06, 64, 1, true).translate(0, 0.02, 0), new THREE.MeshPhysicalMaterial({ color: cuff, roughness: 0.75, sheen: 0.6, sheenColor: 0xffffff, side: THREE.DoubleSide }));
     sleeveMesh.position.y = 0.035; this.sleeveMesh = sleeveMesh;
     for (const m of [sleeveMesh, cuffMesh]) { m.castShadow = m.receiveShadow = true; this.sleeve.add(m); }
+    // A skin disc just inside the cuff closes the hand mesh's open wrist, which shows when looking down the sights.
+    const cap = new THREE.Mesh(new THREE.CircleGeometry(0.036, 48).rotateX(-Math.PI / 2).translate(0, 0.004, 0), this.mesh.material);
+    this.sleeve.add(cap); this.cap = cap;
     const d = new THREE.Group(), w = this.wrist.position;
     const dorsal = new THREE.Vector3(1, 0, 0).applyQuaternion(this.wrist.quaternion);
     const along = new THREE.Vector3(0, 0, 1).applyQuaternion(this.wrist.quaternion); // toward the elbow
@@ -189,9 +192,10 @@ class Hand {
     const w = this.wrist.getWorldPosition(this._v);
     // Start a little up the forearm from the wrist joint so the cuff hides the mesh edge.
     const dir = elbow.clone().sub(w), len = dir.length(); dir.normalize();
-    this.sleeve.position.copy(w).addScaledVector(dir, 0.012);
+    this.sleeve.position.copy(w).addScaledVector(dir, -0.006);
     this.sleeve.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
     this.sleeveMesh.scale.y = len + 0.25;
+    if (this.cap.material !== this.mesh.material) this.cap.material = this.mesh.material;
   }
 
   setSkin(name) {
