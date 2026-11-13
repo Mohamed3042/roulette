@@ -64,30 +64,30 @@ const STEEL_LOOKS = {
   // edge = bare-steel amount at the wear spots, thinAmt = worn-thin amount on the other edges. env = reflection gain/tint
   // (the rooms are warm). src* = how much of the scanned source maps shows through.
   service: {
-    base: lin(0x161b23), pat: lin(0x55575b), thin: lin(0x50535a), worn: lin(0x77767a), cav: lin(0x0a0908), rustC: lin(0x4a2a18),
-    rBase: 0.32, rWorn: 0.42, rCav: 0.82, mBase: 0.8, mWorn: 1.0,
+    base: lin(0x161b23), pat: lin(0x55575b), thin: lin(0x50535a), worn: lin(0x69686b), cav: lin(0x0a0908), rustC: lin(0x4a2a18),
+    rBase: 0.32, rWorn: 0.48, rCav: 0.82, mBase: 0.8, mWorn: 1.0,
     edge: 1.0, thinAmt: 0.75, scratch: 0.35, brush: 0.0, cavAmt: 0.85, patina: 0.9, grey: 0.0, speck: 0.6, rust: 0.6, cc: 0.12, ccR: 0.38, caseAmt: 0.85,
-    srcRough: 0.15, srcLum: 0.2, iri: 0, iriNm: 330, env: [1.12, 1.2, 1.34],
+    srcRough: 0.15, srcLum: 0.2, iri: 0, iriNm: 330, env: [1.12, 1.2, 1.34], specMax: 0.18,
   },
   stainless: {
     base: lin(0xa8adb3), pat: lin(0xa0a5ab), thin: lin(0xa6abb0), worn: lin(0xb4b8bd), cav: lin(0x2e3034), rustC: lin(0x979ca2),
     rBase: 0.34, rWorn: 0.26, rCav: 0.55, mBase: 1.0, mWorn: 1.0,
     edge: 0.35, thinAmt: 0.0, scratch: 0.15, brush: 0.25, cavAmt: 0.5, patina: 0.12, grey: 0, speck: 0, rust: 0, cc: 0.0, ccR: 0.3, caseAmt: 0.0,
-    srcRough: 0.45, srcLum: 0.6, iri: 0, iriNm: 300, env: [1.15, 1.32, 1.55],
+    srcRough: 0.45, srcLum: 0.6, iri: 0, iriNm: 300, env: [1.15, 1.32, 1.55], specMax: 0.8,
   },
   nickel: {
     base: lin(0xe4e2dc), pat: lin(0xdad7d0), thin: lin(0xe8e6e0), worn: lin(0xf0eee9), cav: lin(0x4a4a48), rustC: lin(0xdad7d0),
     rBase: 0.22, rWorn: 0.16, rCav: 0.5, mBase: 1.0, mWorn: 1.0,
     edge: 0.3, thinAmt: 0.0, scratch: 0.15, brush: 0.0, cavAmt: 0.6, patina: 0.15, grey: 0, speck: 0, rust: 0, cc: 0.0, ccR: 0.3, caseAmt: 0.0,
-    srcRough: 0.1, srcLum: 0.25, iri: 0, iriNm: 300, env: [2.1, 2.1, 2.15],
+    srcRough: 0.1, srcLum: 0.25, iri: 0, iriNm: 300, env: [2.1, 2.1, 2.15], specMax: 0.9,
   },
 };
 const GRIP_LOOKS = {
-  service: { dark: lin(0x100704), light: lin(0x321b0e), hi: lin(0x5a3820), grain: 1.0, rough: 0.46, roughChk: 0.7, cc: 0.32, ccR: 0.3, normal: 'checker', nScale: 1.0 },
+  service: { dark: lin(0x140904), light: lin(0x2c170b), hi: lin(0x4a2e1a), grain: 0.7, rough: 0.46, roughChk: 0.7, cc: 0.32, ccR: 0.3, normal: 'checker', nScale: 1.0 },
   stainless: { dark: lin(0x060606), light: lin(0x0a0a0a), hi: lin(0x0d0d0d), grain: 0.0, rough: 0.86, roughChk: 0.86, cc: 0.0, ccR: 0.6, normal: 'stipple', nScale: 0.7, spec: 0.22, specC: 0xb4c0d0 },
   nickel: { dark: lin(0xcdbf9f), light: lin(0xece5d3), hi: lin(0xf4efe3), grain: 0.25, rough: 0.3, roughChk: 0.42, cc: 0.45, ccR: 0.25, normal: 'checker', nScale: 0.6 },
 };
-const MEDAL_LOOKS = { service: [0xb9b2a4, 0.42], stainless: [0xb9b8b4, 0.3], nickel: [0xc9a35c, 0.3] };
+const MEDAL_LOOKS = { service: [0x8f8a80, 0.5], stainless: [0xb9b8b4, 0.3], nickel: [0xc9a35c, 0.3] };
 
 function steelMaterial(A, isCase, muzzleZ, isCyl = false) {
   const u = {
@@ -95,7 +95,7 @@ function steelMaterial(A, isCase, muzzleZ, isCyl = false) {
     uBase: { value: new THREE.Color() }, uPat: { value: new THREE.Color() }, uThin: { value: new THREE.Color() }, uWorn: { value: new THREE.Color() }, uCav: { value: new THREE.Color() },
     uR: { value: new THREE.Vector3() }, uM: { value: new THREE.Vector2() },
     uAmt: { value: new THREE.Vector4() }, uAmt2: { value: new THREE.Vector4() }, uAmt3: { value: new THREE.Vector4(0, muzzleZ, 0, 0) },
-    uAmt4: { value: new THREE.Vector4() }, uRust: { value: new THREE.Color() }, uEnvK: { value: new THREE.Vector3(1, 1, 1) }, uCyl: { value: isCyl ? 1 : 0 },
+    uAmt4: { value: new THREE.Vector4() }, uRust: { value: new THREE.Color() }, uEnvK: { value: new THREE.Vector3(1, 1, 1) }, uCyl: { value: isCyl ? 1 : 0 }, uSpecMax: { value: 1 },
   };
   const m = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 1, roughness: 0.3, aoMap: A.wear, aoMapIntensity: 0.65, normalMap: A.normal, clearcoat: 0.4, clearcoatRoughness: 0.2 });
   m.normalScale.set(1, -1);
@@ -130,7 +130,7 @@ float vn(vec3 x) {
   float loc = smoothstep(-0.150, -0.195, vR.z);
   loc = max(loc, exp(-pow((vR.z + 0.0362) / 0.0035, 2.0)) * step(0.004, vR.y));
   loc = max(loc, smoothstep(0.056, 0.061, vR.y) * step(vR.z, 0.03));
-  loc = max(loc, smoothstep(-0.031, -0.038, vR.y));
+  loc = max(loc, smoothstep(-0.034, -0.040, vR.y) * 0.7);
   loc = max(loc, smoothstep(0.036, 0.044, vR.y) * step(0.5, uAmt2.z));
   float crown = step(vR.z, uAmt3.y);
   // edges: the finish is only worn thin, and broken up along their length by low-frequency noise
@@ -138,7 +138,7 @@ float vn(vec3 x) {
   float brk = smoothstep(0.42, 0.62, cSm * 0.7 + cMid * 0.3);
   float jit = (cSp - 0.5) * 0.25 + (sc.r - 0.5) * 0.15;
   float thinE = smoothstep(0.2, 0.45, e + jit * 0.6) * brk * uAmt.y;
-  float bareE = clamp(smoothstep(0.3, 0.5, e * (0.6 + 0.4 * brk) + loc * 0.4 * cMid + jit) * loc * uAmt.x + crown * smoothstep(0.3, 0.6, cSp + 0.2), 0.0, 1.0);
+  float bareE = clamp(smoothstep(0.3, 0.5, e * (0.6 + 0.4 * brk) + loc * 0.3 * cMid * step(vR.y, 0.05) * step(-0.03, vR.y) + jit) * loc * uAmt.x + crown * smoothstep(0.3, 0.6, cSp + 0.2), 0.0, 1.0);
   float scr = smoothstep(0.6, 0.92, sc.r) * uAmt.z;                               // a few fine handling scratches
   float cav = smoothstep(0.08, 0.55, wr.g) * uAmt2.y;
   float brush = sc.g - 0.5;
@@ -195,10 +195,12 @@ float vn(vec3 x) {
       .replace('#include <aomap_fragment>', '#include <aomap_fragment>\n  reflectedLight.indirectDiffuse *= mix(1.0, starAO / max(ambientOcclusion, 0.05), starZone);')
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= gCoat;\n#endif')
       // per-look reflection gain and tint (the rooms are warm; scene.environmentIntensity overrides envMapIntensity)
-      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  radiance *= uEnvK; iblIrradiance *= uEnvK;\n#ifdef USE_CLEARCOAT\n  clearcoatRadiance *= uEnvK;\n#endif');
-    s.fragmentShader = 'uniform vec3 uEnvK;\n' + s.fragmentShader;
+      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  radiance *= uEnvK; iblIrradiance *= uEnvK;\n#ifdef USE_CLEARCOAT\n  clearcoatRadiance *= uEnvK;\n#endif')
+      // grazing lamp glints on worn steel stay under the bloom threshold (no glowing rings along curved edges)
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directSpecular *= mix(0.3, 1.0, smoothstep(0.04, 0.35, dot(normal, geometryViewDir)));\n  reflectedLight.directSpecular *= min(1.0, uSpecMax / max(dot(reflectedLight.directSpecular, vec3(0.2126, 0.7152, 0.0722)), 1e-4));\n#ifdef USE_CLEARCOAT\n  clearcoatSpecularDirect *= min(1.0, uSpecMax * 0.5 / max(dot(clearcoatSpecularDirect, vec3(0.2126, 0.7152, 0.0722)), 1e-4));\n#endif');
+    s.fragmentShader = 'uniform vec3 uEnvK; uniform float uSpecMax;\n' + s.fragmentShader;
   };
-  m.customProgramCacheKey = () => m.name + '-v7';
+  m.customProgramCacheKey = () => m.name + '-v11';
   return m;
 }
 
@@ -210,7 +212,7 @@ function applySteelLook(m, L) {
   u.uAmt2.value.set(L.patina, L.cavAmt, m.name === 'steel_case' ? L.caseAmt : 0, L.srcRough);
   u.uAmt3.value.x = L.srcLum; u.uAmt3.value.z = L.grey;
   u.uAmt4.value.set(L.speck, L.rust, 0, 0); u.uRust.value.copy(L.rustC);
-  u.uEnvK.value.fromArray(L.env);
+  u.uEnvK.value.fromArray(L.env); u.uSpecMax.value = L.specMax;
   m.clearcoat = L.cc; m.clearcoatRoughness = L.ccR;
   // blued steel is a thin oxide film: iridescence tints its reflections blue
   m.iridescence = L.iri; m.iridescenceIOR = 2.0; m.iridescenceThicknessRange = [L.iriNm * 0.8, L.iriNm];
