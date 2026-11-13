@@ -724,7 +724,7 @@ export function createRange(ctx) {
   const GRIP = { thumb: [0.7, -0.25, -0.4, 0.05], index: [-0.25, 0.85, 0.45, -0.2], middle: [0.55, 1.3, 1.35, 0], ring: [0.42, 1.15, 0.85, 0], pinky: [0.1, 0.8, 1.1, 0], cup: 0.3 };
   const THUMB_PRESS = [0.35, 0.35, 0.3, 0.2];
   // Support hand (left) in gun space, when aiming: palm on the left grip panel, fingers over the shooting hand's.
-  const SUP = { pos: V(-0.004, -0.03, 0.05), finger: V(0.2, -0.5, -0.84), palm: V(0.95, 0.25, 0.1), elbow: V(-0.75, -0.2, 0.05) };
+  const SUP = { pos: V(-0.004, -0.03, 0.05), finger: V(0.2, -0.5, -0.84), palm: V(0.95, 0.25, 0.1), elbow: V(-0.7, -0.7, -0.35) };
   const SUP_POSE = { thumb: [0.35, 0.25, 0.1, 0.05], index: [0.8, 1.15, 0.6, 0.05], middle: [0.85, 1.2, 0.65, 0], ring: [0.9, 1.2, 0.65, 0], pinky: [0.95, 1.15, 0.6, -0.05], cup: 0.4 };
   // Magazine hand: palm under the base plate, index finger along the front of the magazine.
   const MAGH = { off: V(0, -0.098, 0.036), finger: V(0.1, 0.15, -1), palm: V(0, 1, 0.1), elbow: V(-0.12, -0.35, 0.3) };
