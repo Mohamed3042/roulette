@@ -2,82 +2,211 @@
 // The rig is flat (every joint is a direct child of the armature), so each frame we chain
 // joint rotations ourselves: joint -Z runs along the bone, +Y is the back of the hand,
 // so curling a finger is a negative rotation about the joint's local X.
+// The skin maps (albedo, relief, occlusion/roughness/pigment, glove relief, pore and leather tiles) are baked by
+// tools/blender/build_hands.py from anatomy laid out around this rig; both hands share one UV atlas.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 const FINGERS = { index: 'index-finger', middle: 'middle-finger', ring: 'ring-finger', pinky: 'pinky-finger' };
 const LONG = ['metacarpal', 'phalanx-proximal', 'phalanx-intermediate', 'phalanx-distal', 'tip'];
 const THUMB = ['metacarpal', 'phalanx-proximal', 'phalanx-distal', 'tip'];
 
+// Skin looks. The maps are baked for "medium"; `gain` re-grades the albedo per channel, weighted by the pigment mask
+// (palms and nails take less of it, as on real hands). `wrap` is how far direct light bleeds past the terminator per
+// channel (red furthest), a cheap stand-in for light scattered under the skin.
 export const SKINS = {
-  light: { color: 0xe3c0aa, sheen: 0xe0a294, sss: 0xc0402a },
-  medium: { color: 0xb38569, sheen: 0xc08a78, sss: 0xa0331e },
-  deep: { color: 0x684634, sheen: 0x9a6b58, sss: 0x6a1e10 },
-  gloves: { color: 0x15110f, sheen: 0x6e5d4e, glove: true },
+  light: { gain: [1.34, 1.46, 1.56], wrap: [0.5, 0.24, 0.16], sss: 0xd07058, spec: 0.5, cap: 0x4a3028 },
+  medium: { gain: [1, 1, 1], wrap: [0.48, 0.22, 0.15], sss: 0xb0503a, spec: 0.5, cap: 0x3a2218 },
+  deep: { gain: [0.4, 0.35, 0.33], wrap: [0.4, 0.18, 0.12], sss: 0x7a3020, spec: 0.6, cap: 0x1c100a },
+  gloves: { glove: true, color: 0x211813, wrap: [0.1, 0.08, 0.08], spec: 0.85, cap: 0x0e0a08 },
 };
 
-function grainNormal() {
-  const S = 1024, cv = document.createElement('canvas'); cv.width = cv.height = S;
-  const g = cv.getContext('2d'), img = g.createImageData(S, S);
-  const h = new Float32Array(S * S);
-  for (let i = 0; i < h.length; i++) h[i] = Math.random();
-  for (let k = 0; k < 2; k++) for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-    const i = y * S + x; h[i] = (h[i] + h[y * S + ((x + 1) % S)] + h[((y + 1) % S) * S + x]) / 3;
+const MODELS = new URL('../assets/models/', import.meta.url).href;
+const DRACO = new URL('../vendor/three/addons/libs/draco/gltf/', import.meta.url).href;
+// Must match tools/blender/build_hands.py: map size, stored height range (m), physical size of the tiles (m).
+const MAP = { res: 2048, tile: 512, heightRange: 0.0016, tileSkin: 0.012, tileLeather: 0.02 };
+
+// One material per look, on MeshPhysicalMaterial:
+//  - normals from the baked height map (4 taps at full resolution) plus a tiled micro relief (pores, or leather grain),
+//  - albedo graded per look with the pigment mask; gloves take a leather colour and the stitch mask,
+//  - wrapped direct diffuse (see `wrap`).
+function skinMaterial(look, T, uvMeters) {
+  const s = SKINS[look] || SKINS.medium, glove = !!s.glove;
+  const m = new THREE.MeshPhysicalMaterial({
+    color: glove ? s.color : 0xffffff, map: glove ? null : T.albedo,
+    roughness: glove ? 0.55 : 1, roughnessMap: glove ? null : T.orm, aoMap: T.orm, aoMapIntensity: 1,
+    normalMap: glove ? T.gloveH : T.height,
+    specularIntensity: s.spec, sheen: glove ? 0.4 : 0.22, sheenRoughness: glove ? 0.45 : 0.6, sheenColor: glove ? 0x6a5848 : 0xc89282,
+    clearcoat: glove ? 0.3 : 0.1, clearcoatRoughness: glove ? 0.42 : 0.36,
+    emissive: glove ? 0x000000 : s.sss, emissiveIntensity: glove ? 0 : 0.03,
+  });
+  const detail = glove ? T.leather : T.pores;
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, {
+      uOrm: { value: T.orm }, uDetail: { value: detail }, uGain: { value: new THREE.Vector3(...(s.gain || [1, 1, 1])) },
+      uSlope: { value: MAP.heightRange / uvMeters }, uDetailRep: { value: uvMeters / (glove ? MAP.tileLeather : MAP.tileSkin) },
+      uDetailK: { value: glove ? 2.2 : 1.6 }, uWrap: { value: new THREE.Vector3(...s.wrap) },
+    });
+    sh.fragmentShader = 'uniform sampler2D uOrm, uDetail; uniform vec3 uGain, uWrap; uniform float uSlope, uDetailRep, uDetailK;\n' + sh.fragmentShader
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        vec4 ormT = texture2D( uOrm, vNormalMapUv );
+        ${glove ? `diffuseColor.rgb *= 0.7 + 0.3 * ormT.r;
+        diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.2, 0.17, 0.14 ), smoothstep( 0.2, 0.8, ormT.a ) * 0.8 );`
+        : 'diffuseColor.rgb *= mix( vec3( 1.0 ), uGain, ormT.b );'}`)
+      .replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', `
+        const float hT = 1.0 / ${MAP.res}.0;
+        vec2 g = vec2( texture2D( normalMap, vNormalMapUv + vec2( hT, 0.0 ) ).r - texture2D( normalMap, vNormalMapUv - vec2( hT, 0.0 ) ).r,
+                       texture2D( normalMap, vNormalMapUv + vec2( 0.0, hT ) ).r - texture2D( normalMap, vNormalMapUv - vec2( 0.0, hT ) ).r ) * ( uSlope / ( 2.0 * hT ) );
+        vec2 dUv = vNormalMapUv * uDetailRep; const float dT = 1.0 / ${MAP.tile}.0;
+        vec2 gd = vec2( texture2D( uDetail, dUv + vec2( dT, 0.0 ) ).r - texture2D( uDetail, dUv - vec2( dT, 0.0 ) ).r,
+                        texture2D( uDetail, dUv + vec2( 0.0, dT ) ).r - texture2D( uDetail, dUv - vec2( 0.0, dT ) ).r );
+        // fade the micro relief out as its texels shrink below a pixel, so it never shimmers
+        float dFade = clamp( 2.0 - 0.75 * ${MAP.tile}.0 * length( fwidth( dUv ) ), 0.0, 1.0 );
+        vec3 mapN = vec3( -( g + gd * uDetailK * dFade ), 1.0 );`)
+      .replace('#include <lights_physical_pars_fragment>', THREE.ShaderChunk.lights_physical_pars_fragment.replace(
+        'reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );',
+        `float nlW = dot( geometryNormal, directLight.direction );
+        vec3 wrapIrr = directLight.color * clamp( ( vec3( nlW ) + uWrap ) / ( 1.0 + uWrap ), 0.0, 1.0 );
+        reflectedLight.directDiffuse += wrapIrr * BRDF_Lambert( material.diffuseColor );`));
+  };
+  m.customProgramCacheKey = () => 'hand-' + look;
+  return m;
+}
+
+// ---------------------------------------------------------------- fabric
+// Small value-noise helpers for the fabric tiles (periodic on the tile).
+function noiseTile(S, cells, seed) {
+  let x = seed * 9301 + 49297; const rnd = () => ((x = (x * 9301 + 49297) % 233280) / 233280);
+  const g = new Float32Array(cells * cells).map(rnd), out = new Float32Array(S * S);
+  for (let y = 0; y < S; y++) for (let xx = 0; xx < S; xx++) {
+    const fx = (xx / S) * cells, fy = (y / S) * cells, ix = Math.floor(fx), iy = Math.floor(fy), tx = fx - ix, ty = fy - iy;
+    const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+    const a = g[(iy % cells) * cells + (ix % cells)], b = g[(iy % cells) * cells + ((ix + 1) % cells)];
+    const c = g[((iy + 1) % cells) * cells + (ix % cells)], d = g[((iy + 1) % cells) * cells + ((ix + 1) % cells)];
+    out[y * S + xx] = (a + (b - a) * sx) * (1 - sy) + (c + (d - c) * sx) * sy;
   }
+  return out;
+}
+function heightToNormal(h, S, k) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const g = cv.getContext('2d'), img = g.createImageData(S, S);
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-    const i = y * S + x, dx = h[y * S + ((x + 1) % S)] - h[i], dy = h[((y + 1) % S) * S + x] - h[i];
-    img.data[i * 4] = 128 + dx * 220; img.data[i * 4 + 1] = 128 + dy * 220; img.data[i * 4 + 2] = 255; img.data[i * 4 + 3] = 255;
+    const i = y * S + x;
+    const dx = (h[y * S + ((x + 1) % S)] - h[y * S + ((x + S - 1) % S)]) * k, dy = (h[((y + 1) % S) * S + x] - h[((y + S - 1) % S) * S + x]) * k;
+    const l = Math.hypot(dx, dy, 1);
+    img.data[i * 4] = 128 - (dx / l) * 127; img.data[i * 4 + 1] = 128 + (dy / l) * 127; img.data[i * 4 + 2] = (1 / l) * 255; img.data[i * 4 + 3] = 255;
   }
   g.putImageData(img, 0, 0);
-  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2.5, 2.5); t.anisotropy = 16;
+  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
   return t;
 }
-
-function tweedTexture(base, fleck) {
-  const S = 1024, K = S / 256, cv = document.createElement('canvas'); cv.width = cv.height = S;
-  const g = cv.getContext('2d');
-  g.fillStyle = base; g.fillRect(0, 0, S, S);
-  for (let y = 0; y < 256; y += 2) for (let x = 0; x < 256; x += 2) {
-    const herring = ((Math.floor(x / 8) + (Math.floor(y / 16) % 2 ? y : -y) / 2) % 4 + 4) % 4 < 2;
-    g.fillStyle = herring ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.12)';
-    g.fillRect(x * K, y * K, 2 * K, 2 * K);
-    if (Math.random() < 0.035) { g.fillStyle = fleck; g.fillRect(x * K, y * K, 2 * K, K); }
+// Wool tweed in a herringbone, at real scale: the tile is 32 mm square, stripes 8 mm wide, twill about 1.1 mm.
+const TWEED_MM = 32;
+let tweedH = null;
+function tweedHeight() {
+  if (tweedH) return tweedH;
+  const S = 512, mm = S / TWEED_MM, h = new Float32Array(S * S), fleck = new Float32Array(S * S);
+  const n1 = noiseTile(S, 64, 3), n2 = noiseTile(S, 16, 7), n3 = noiseTile(S, 128, 11), nf = noiseTile(S, 96, 5);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const i = y * S + x, X = x / mm, Y = y / mm;
+    const stripe = Math.floor(X / 8), dir = stripe % 2 ? 1 : -1;
+    const ph = (Y + dir * X) / 1.1 + n1[i] * 0.6;
+    const tw = 0.5 + 0.5 * Math.cos(ph * Math.PI * 2);
+    const seam = Math.min(1, Math.abs((X % 8) - 0) * 1.5, Math.abs(8 - (X % 8)) * 1.5);
+    h[i] = (0.55 * tw * tw + 0.25 * n3[i] + 0.2 * n2[i]) * (0.75 + 0.25 * seam);
+    fleck[i] = Math.max(0, nf[i] * 0.6 + n3[i] * 0.5 - 0.78) * 6;
   }
-  for (let y = 0; y < S; y += 2) {
-    g.fillStyle = y % 4 ? 'rgba(0,0,0,.05)' : 'rgba(255,255,255,.04)';
-    for (let x = (y / 2) % 4; x < S; x += 4) g.fillRect(x, y, 2, 1);
+  return (tweedH = { h, fleck, S });
+}
+function tweedMaps(base, fleckCol) {
+  const { h, fleck, S } = tweedHeight();
+  const cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const g = cv.getContext('2d'), img = g.createImageData(S, S);
+  const b = new THREE.Color(base), f = new THREE.Color(fleckCol);
+  const br = b.r * 255, bg = b.g * 255, bb = b.b * 255;
+  for (let i = 0; i < S * S; i++) {
+    const v = 0.72 + 0.5 * h[i], k = Math.min(1, fleck[i]);
+    img.data[i * 4] = Math.min(255, br * v * (1 - k) + f.r * 255 * k);
+    img.data[i * 4 + 1] = Math.min(255, bg * v * (1 - k) + f.g * 255 * k);
+    img.data[i * 4 + 2] = Math.min(255, bb * v * (1 - k) + f.b * 255 * k);
+    img.data[i * 4 + 3] = 255;
   }
-  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 4); t.anisotropy = 16;
-  return t;
+  g.putImageData(img, 0, 0);
+  const map = new THREE.CanvasTexture(cv); map.colorSpace = THREE.SRGBColorSpace; map.wrapS = map.wrapT = THREE.RepeatWrapping; map.anisotropy = 8;
+  tweedMaps.normal ||= heightToNormal(h, S, 2.2);
+  return { map, normal: tweedMaps.normal };
+}
+// Shirting: a fine oxford weave (6 mm tile) as relief only; the cuff colour comes from the room.
+const OXFORD_MM = 6;
+let oxfordN = null;
+function oxfordNormal() {
+  if (oxfordN) return oxfordN;
+  const S = 256, mm = S / OXFORD_MM, h = new Float32Array(S * S), n = noiseTile(S, 32, 13);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const X = x / mm, Y = y / mm, wx = Math.floor(X / 0.25), wy = Math.floor(Y / 0.25);
+    const over = (wx + wy) % 2;
+    const sx = Math.sin(((X % 0.25) / 0.25) * Math.PI), sy = Math.sin(((Y % 0.25) / 0.25) * Math.PI);
+    h[y * S + x] = (over ? sx * 0.8 + sy * 0.2 : sy * 0.8 + sx * 0.2) * 0.7 + n[y * S + x] * 0.3;
+  }
+  return (oxfordN = heightToNormal(h, S, 1.2));
 }
 
-function watchFace() {
-  const S = 512, cv = document.createElement('canvas'); cv.width = cv.height = S;
-  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
-  const draw = () => {
-    const g = cv.getContext('2d'), c = S / 2, d = new Date();
-    g.fillStyle = '#efe6d2'; g.fillRect(0, 0, S, S);
-    g.strokeStyle = '#2a2116';
-    for (let i = 0; i < 60; i++) {
-      const a = i * Math.PI / 30, r0 = i % 5 ? 216 : 192;
-      g.lineWidth = i % 5 ? 4 : 12; g.beginPath(); g.moveTo(c + Math.sin(a) * r0, c - Math.cos(a) * r0); g.lineTo(c + Math.sin(a) * 236, c - Math.cos(a) * 236); g.stroke();
+// A tailored tube: elliptical cross-section A(y) x B(y) around +Y, a turned hem with real thickness, soft folds.
+// prof: list of [y, d] (d = offset along the outward normal of the ellipse); bump(phi, y) adds folds (m).
+function tubeGeometry({ prof, A, B, bump = () => 0, seg = 64, uRep = 1, vScale = 1, offZ = 0 }) {
+  const n = prof.length, pos = new Float32Array((seg + 1) * n * 3), uv = new Float32Array((seg + 1) * n * 2), idx = [];
+  let along = 0;
+  for (let j = 0; j < n; j++) {
+    if (j) along += Math.hypot(prof[j][0] - prof[j - 1][0], prof[j][1] - prof[j - 1][1]);
+    const [y, d] = prof[j], a = A(y), b = B(y);
+    for (let i = 0; i <= seg; i++) {
+      const ph = (i / seg) * Math.PI * 2, c = Math.cos(ph), s = Math.sin(ph);
+      let nx = c / a, nz = s / b; const l = Math.hypot(nx, nz); nx /= l; nz /= l;
+      const off = d + bump(ph, y), k = (j * (seg + 1) + i);
+      pos[k * 3] = a * c + nx * off; pos[k * 3 + 1] = y; pos[k * 3 + 2] = b * s + nz * off + offZ;
+      uv[k * 2] = (i / seg) * uRep; uv[k * 2 + 1] = along * vScale;
     }
-    const hand = (a, len, w) => { g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); g.moveTo(c, c); g.lineTo(c + Math.sin(a) * len, c - Math.cos(a) * len); g.stroke(); };
-    const m = d.getMinutes() + d.getSeconds() / 60, h = (d.getHours() % 12) + m / 60;
-    g.strokeStyle = '#1c150e'; hand(h * Math.PI / 6, 120, 18); hand(m * Math.PI / 30, 184, 12);
-    g.fillStyle = '#b08d4a'; g.beginPath(); g.arc(c, c, 16, 0, Math.PI * 2); g.fill();
-    t.needsUpdate = true;
-  };
-  draw(); setInterval(draw, 30000);
-  return t;
+  }
+  for (let j = 0; j < n - 1; j++) for (let i = 0; i < seg; i++) {
+    const a = j * (seg + 1) + i, b = a + seg + 1;
+    idx.push(a, b, a + 1, b, b + 1, a + 1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(idx);
+  g.computeVertexNormals();
+  // weld the normals across the seam column
+  const nr = g.attributes.normal;
+  for (let j = 0; j < n; j++) {
+    const a = j * (seg + 1), b = a + seg;
+    const x = nr.getX(a) + nr.getX(b), y = nr.getY(a) + nr.getY(b), z = nr.getZ(a) + nr.getZ(b), l = Math.hypot(x, y, z) || 1;
+    nr.setXYZ(a, x / l, y / l, z / l); nr.setXYZ(b, x / l, y / l, z / l);
+  }
+  return g;
 }
+// hem profile: outer wall from yFar down to the edge, a rounded turn of radius r, the inner wall back up to yIn.
+function hemProfile(yEdge, r, yFar, yIn, steps) {
+  const p = [];
+  for (let k = 0; k <= steps; k++) { const t = k / steps; p.push([yFar + (yEdge + r - yFar) * Math.pow(t, 0.8), 0]); }
+  for (let k = 1; k <= 8; k++) { const a = (k / 8) * Math.PI; p.push([yEdge + r - Math.sin(a) * r, -r + Math.cos(a) * r - 0 * a]); }
+  p.push([yEdge + r + 0.004, -2 * r], [yIn, -2 * r]);
+  return p;
+}
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+// Sleeve layout along the arm, in metres from the cuff edge (y = 0), which sits CUFF_AT up the arm from the wrist joint.
+const CUFF_AT = -0.011;          // the wrist joint is ~2 cm up the forearm from the wrist crease; the cuff ends just past it
+const CUFF = { a: 0.0332, b: 0.0242, off: 0.0015 };    // shirt cuff semi-axes (across, back-to-palm); centre toward the palm
+const HEM_Y = 0.0135;            // jacket hem: 13.5 mm of shirt cuff shows
+const JACKET = { a0: 0.0372, b0: 0.0288, a1: 0.047, b1: 0.04, len: 0.72 };
 
 class Hand {
-  constructor(scene, side) {
-    this.side = side;
+  constructor(scene, side, T) {
+    this.side = side; this.T = T;
     this.group = new THREE.Group(); this.group.name = side + '-hand';
     this.group.add(scene);
     scene.traverse((o) => { if (o.isSkinnedMesh) { this.mesh = o; o.castShadow = o.receiveShadow = true; o.frustumCulled = false; } });
+    this.uvMeters = this.mesh.userData.uvMeters || 0.457;
     const bone = (n) => scene.getObjectByName(n);
     this.wrist = bone('wrist');
     // Trim the forearm stub to 2 cm past the wrist (+Y runs up the arm) so it stays inside the cuff when the wrist bends.
@@ -94,44 +223,9 @@ class Hand {
     };
     for (const [k, p] of Object.entries(FINGERS)) build(k, p, LONG);
     build('thumb', 'thumb', THUMB);
-    this.paintNails();
     this.pose = { thumb: [0, 0, 0, 0], index: [0, 0, 0, 0], middle: [0, 0, 0, 0], ring: [0, 0, 0, 0], pinky: [0, 0, 0, 0], cup: 0 };
     this._q = new THREE.Quaternion(); this._e = new THREE.Euler(); this._v = new THREE.Vector3();
-  }
-
-  // Nails: the bind-pose mesh has none painted, so the backs of the distal phalanges read as skin. Mark the nail plate
-  // in the vertex colours (paler, pinker, a white free edge) from the joint frames: +Y of a joint is the back of the finger.
-  paintNails() {
-    const g = this.mesh.geometry, pos = g.attributes.position, nrm = g.attributes.normal;
-    if (!g.attributes.color) {
-      const c = new Float32Array(pos.count * 3).fill(1); g.setAttribute('color', new THREE.BufferAttribute(c, 3));
-    }
-    const col = g.attributes.color, v = new THREE.Vector3(), n = new THREE.Vector3(), seg = new THREE.Vector3(), rel = new THREE.Vector3();
-    this.nailMask = new Float32Array(pos.count);
-    for (const [key, ch] of Object.entries(this.chains)) {
-      const k = ch.bones.length, a = ch.P[k - 2], b = ch.P[k - 1], Q = ch.Q[k - 2];
-      const dorsal = new THREE.Vector3(0, 1, 0).applyQuaternion(Q);
-      seg.copy(b).sub(a); const L = seg.length(); seg.normalize();
-      const w = key === 'thumb' ? 0.0068 : key === 'pinky' ? 0.0048 : 0.0056;
-      for (let i = 0; i < pos.count; i++) {
-        v.fromBufferAttribute(pos, i); rel.copy(v).sub(a);
-        const t = rel.dot(seg) / L; if (t < 0.38 || t > 1.25) continue;
-        rel.addScaledVector(seg, -rel.dot(seg));
-        const up = rel.dot(dorsal), side = Math.sqrt(Math.max(0, rel.lengthSq() - up * up));
-        n.fromBufferAttribute(nrm, i);
-        if (up <= 0 || side > w || n.dot(dorsal) < 0.35) continue;
-        const edge = Math.min(1, (w - side) / 0.0012) * Math.min(1, (t - 0.38) / 0.08);
-        this.nailMask[i] = Math.max(this.nailMask[i], edge * (t > 1.0 ? 2 : 1));
-      }
-    }
-    for (let i = 0; i < pos.count; i++) {
-      const m = Math.min(1, this.nailMask[i]); if (!m) continue;
-      const free = this.nailMask[i] > 1 ? 1 : 0;
-      const r = col.getX(i), gg = col.getY(i), bb = col.getZ(i);
-      const tr = free ? 1.5 : 1.3, tg = free ? 1.45 : 1.14, tb = free ? 1.42 : 1.12;
-      col.setXYZ(i, r + (Math.min(1, r * tr) - r) * m, gg + (Math.min(1, gg * tg) - gg) * m, bb + (Math.min(1, bb * tb) - bb) * m);
-    }
-    col.needsUpdate = true;
+    this._m = new THREE.Matrix4(); this._x = new THREE.Vector3(); this._z = new THREE.Vector3();
   }
 
   // pose: finger = [mcp, pip, dip, spread]; thumb = [cmcFlex, cmcSpread, mcp, ip]; cup = palm arch.
@@ -157,18 +251,62 @@ class Hand {
     }
   }
 
-  // Forearm (cuff + sleeve) lives in world space and is aimed from the wrist to an elbow point each
-  // frame, because the real wrist bends; only the watch rides on the hand's wrist frame.
+  // Forearm (shirt cuff + jacket sleeve) lives in world space and is aimed from the wrist to an elbow point each
+  // frame, because the real wrist bends; it rolls with the wrist so the oval keeps to the forearm. The watch rides on
+  // the hand's wrist frame. Sleeve-local axes: +Y up the arm, +X the wrist's across axis, +Z toward the palm.
   dress({ sleeve, cuff, watch }) {
     if (this.dressing) this.group.children[0].remove(this.dressing);
     this.sleeve ||= new THREE.Group();
+    this.sleeve.traverse((o) => { if (o.isMesh && o !== this.cap) { o.geometry.dispose(); o.material.map?.dispose(); o.material.dispose(); } });
     this.sleeve.clear();
-    const sleeveMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.047, 0.038, 1, 72, 1, true).translate(0, 0.5, 0), new THREE.MeshPhysicalMaterial({ map: tweedTexture(sleeve, '#d8c9a6'), roughness: 0.92, sheen: 1, sheenRoughness: 0.7, sheenColor: new THREE.Color(sleeve).multiplyScalar(1.6) }));
-    const cuffMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.0375, 0.034, 0.06, 64, 1, true).translate(0, 0.02, 0), new THREE.MeshPhysicalMaterial({ color: cuff, roughness: 0.75, sheen: 0.6, sheenColor: 0xffffff, side: THREE.DoubleSide }));
-    sleeveMesh.position.y = 0.035; this.sleeveMesh = sleeveMesh;
-    for (const m of [sleeveMesh, cuffMesh]) { m.castShadow = m.receiveShadow = true; this.sleeve.add(m); }
-    // A skin disc just inside the cuff closes the hand mesh's open wrist, which shows when looking down the sights.
-    const cap = new THREE.Mesh(new THREE.CircleGeometry(0.036, 48).rotateX(-Math.PI / 2).translate(0, 0.004, 0), this.mesh.material);
+    const right = this.side === 'right';
+    // The watch sits on the wrist's +X side; the left cuff rides up over it there.
+    const watchSide = watch ? 1 : 0;
+    const bulge = (ph, y) => watchSide * 0.0062 * Math.pow(Math.max(0, Math.cos(ph)), 6) * smooth(0.034, 0.0, y);
+    const cuffProf = hemProfile(0, 0.0011, 0.06, 0.018, 10);
+    const cuffGeo = tubeGeometry({ prof: cuffProf, A: () => CUFF.a, B: () => CUFF.b, bump: bulge, seg: 72, offZ: CUFF.off, uRep: Math.round((2 * Math.PI * 0.029) / (OXFORD_MM / 1000)), vScale: 1000 / OXFORD_MM });
+    const cuffMat = new THREE.MeshPhysicalMaterial({ color: cuff, roughness: 0.82, sheen: 0.5, sheenRoughness: 0.6, sheenColor: new THREE.Color(cuff).multiplyScalar(0.9), normalMap: oxfordNormal(), normalScale: new THREE.Vector2(0.35, 0.35), side: THREE.DoubleSide });
+    // topstitching 5 mm from the cuff edge: a fine darker line in the cuff's own colour
+    cuffMat.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+        { float yy = vNormalMapUv.y * ${OXFORD_MM / 1000}; float st = smoothstep( 0.00045, 0.0, abs( yy - 0.0058 ) ) * step( 0.5, fract( vNormalMapUv.x * 9.0 ) );
+          diffuseColor.rgb *= 1.0 - 0.18 * st; }`);
+    };
+    const cuffMesh = new THREE.Mesh(cuffGeo, cuffMat);
+    // Jacket sleeve: tapers from the hem to the elbow; a little ease bunches above the hem; two soft folds near the elbow.
+    const J = JACKET, ramp = (y) => smooth(HEM_Y, HEM_Y + 0.3, y);
+    const folds = (ph, y) => {
+      let d = 0.0016 * Math.exp(-(((y - HEM_Y - 0.035 - 0.006 * Math.sin(ph * 2 + 0.6)) / 0.012) ** 2)) * (0.5 + 0.5 * Math.cos(ph - 0.8));
+      d += 0.0022 * Math.exp(-(((y - 0.2 - 0.03 * Math.cos(ph)) / 0.03) ** 2)) * (0.55 + 0.45 * Math.sin(ph * 2 + 1.1));
+      d += 0.0018 * Math.exp(-(((y - 0.3 + 0.025 * Math.sin(ph)) / 0.028) ** 2)) * (0.5 + 0.5 * Math.cos(ph * 3 + 0.4));
+      d += 0.0012 * Math.sin(ph * 5 + y * 40) * smooth(0.1, 0.3, y);
+      d += watchSide * 0.003 * Math.pow(Math.max(0, Math.cos(ph)), 6) * smooth(HEM_Y + 0.04, HEM_Y, y);
+      return d;
+    };
+    const jProf = hemProfile(HEM_Y, 0.0016, J.len, HEM_Y + 0.05, 40);
+    const tw = tweedMaps(sleeve, '#d9ccb0');
+    const circ = Math.PI * (J.a0 + J.b0) * 1.1;
+    const jGeo = tubeGeometry({ prof: jProf, A: (y) => J.a0 + (J.a1 - J.a0) * ramp(y), B: (y) => J.b0 + (J.b1 - J.b0) * ramp(y), bump: folds, seg: 96, uRep: Math.round(circ / (TWEED_MM / 1000)), vScale: 1000 / TWEED_MM });
+    const jMat = new THREE.MeshPhysicalMaterial({ map: tw.map, normalMap: tw.normal, normalScale: new THREE.Vector2(0.55, 0.55), roughness: 0.9, sheen: 1, sheenRoughness: 0.55, sheenColor: new THREE.Color(sleeve).multiplyScalar(1.4), side: THREE.DoubleSide });
+    const jacket = new THREE.Mesh(jGeo, jMat); this.sleeveMesh = jacket;
+    // three sleeve buttons on the outer back of the sleeve (horn), kissing
+    const btnMat = new THREE.MeshPhysicalMaterial({ color: 0x2a1d15, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.25 });
+    const btnGeo = new THREE.CylinderGeometry(0.0058, 0.0056, 0.0024, 28);
+    // between the back of the forearm (-Z) and its little-finger side (+X on the right wrist, -X on the left)
+    const bAng = -Math.PI * 0.3;
+    for (let k = 0; k < 3; k++) {
+      const y = HEM_Y + 0.03 + k * 0.0112, a = J.a0 + (J.a1 - J.a0) * ramp(y), b = J.b0 + (J.b1 - J.b0) * ramp(y);
+      const ph = right ? bAng : -Math.PI - bAng, c = Math.cos(ph), s = Math.sin(ph);
+      let nx = c / a, nz = s / b; const l = Math.hypot(nx, nz); nx /= l; nz /= l;
+      const btn = new THREE.Mesh(btnGeo, btnMat);
+      btn.position.set(a * c + nx * (folds(ph, y) + 0.0012), y, b * s + nz * (folds(ph, y) + 0.0012));
+      btn.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(nx, 0, nz));
+      btn.castShadow = true; jacket.add(btn);
+    }
+    for (const m of [jacket, cuffMesh]) { m.castShadow = m.receiveShadow = true; this.sleeve.add(m); }
+    // A dark skin disc just inside the cuff closes the hand mesh's open wrist, which can show when looking down the sights.
+    const cap = new THREE.Mesh(new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2).scale(CUFF.a - 0.003, 1, CUFF.b - 0.003).translate(0, 0.012, CUFF.off),
+      this.capMat ||= new THREE.MeshStandardMaterial({ color: 0x3a2218, roughness: 0.8, side: THREE.DoubleSide }));
     this.sleeve.add(cap); this.cap = cap;
     const d = new THREE.Group(), w = this.wrist.position;
     const dorsal = new THREE.Vector3(1, 0, 0).applyQuaternion(this.wrist.quaternion);
@@ -176,9 +314,10 @@ class Hand {
     const basis = new THREE.Matrix4().makeBasis(dorsal, along, dorsal.clone().cross(along).normalize());
     d.quaternion.setFromRotationMatrix(basis); d.position.copy(w);
     if (watch) {
-      const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.0335, 0.0335, 0.019, 80, 1, true).scale(0.86, 1, 1), new THREE.MeshPhysicalMaterial({ color: 0x3b2316, roughness: 0.55, clearcoat: 0.2, side: THREE.DoubleSide }));
-      strap.position.y = 0.008; d.add(strap);
-      const caseG = new THREE.Group(); caseG.position.set(0.0285, 0.008, 0); caseG.rotation.z = -Math.PI / 2; d.add(caseG);
+      // strap fitted to the wrist (across 2.75 cm, back-to-palm 2.1 cm half-widths), case on the +X side
+      const strap = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.018, 80, 1, true).scale(0.0284, 1, 0.0218), new THREE.MeshPhysicalMaterial({ color: 0x3b2316, roughness: 0.55, clearcoat: 0.2, side: THREE.DoubleSide }));
+      strap.position.set(0, 0.006, -0.001); d.add(strap);
+      const caseG = new THREE.Group(); caseG.position.set(0.0302, 0.006, -0.001); caseG.rotation.z = -Math.PI / 2; d.add(caseG);
       caseG.add(new THREE.Mesh(new THREE.CylinderGeometry(0.0175, 0.0185, 0.0075, 96), new THREE.MeshPhysicalMaterial({ color: 0xd9b46a, metalness: 1, roughness: 0.2 })));
       const face = new THREE.Mesh(new THREE.CircleGeometry(0.0152, 96), new THREE.MeshPhysicalMaterial({ map: watchFace(), roughness: 0.3, clearcoat: 1 }));
       face.rotation.x = -Math.PI / 2; face.rotation.z = Math.PI / 2; face.position.y = 0.0039; caseG.add(face);
@@ -189,34 +328,63 @@ class Hand {
 
   aimSleeve(elbow) {
     if (!this.sleeve) return;
-    const w = this.wrist.getWorldPosition(this._v);
-    // Start a little up the forearm from the wrist joint so the cuff hides the mesh edge.
-    const dir = elbow.clone().sub(w), len = dir.length(); dir.normalize();
-    this.sleeve.position.copy(w).addScaledVector(dir, -0.006);
-    this.sleeve.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-    this.sleeveMesh.scale.y = len + 0.25;
-    if (this.cap.material !== this.mesh.material) this.cap.material = this.mesh.material;
+    const mw = this.wrist.matrixWorld, w = this.wrist.getWorldPosition(this._v);
+    const dir = this._z.copy(elbow).sub(w).normalize();
+    // roll: the wrist's across axis (+X), kept square to the forearm
+    const x = this._x.set(1, 0, 0).transformDirection(mw); x.addScaledVector(dir, -x.dot(dir)).normalize();
+    const z = new THREE.Vector3().crossVectors(x, dir);
+    this._m.makeBasis(x, dir, z);
+    // +Z of the sleeve faces the palm (the wrist's -Y); if the basis points the other way (left hand, mirrored view), reflect it
+    const palm = new THREE.Vector3(0, -1, 0).transformDirection(mw);
+    this.sleeve.quaternion.setFromRotationMatrix(this._m);
+    this.sleeve.scale.set(1, 1, palm.dot(z) < 0 ? -1 : 1);
+    this.sleeve.position.copy(w).addScaledVector(dir, CUFF_AT);
   }
 
   setSkin(name) {
-    const s = SKINS[name] || SKINS.light;
-    const m = new THREE.MeshPhysicalMaterial({
-      color: s.color, vertexColors: !!this.mesh.geometry.attributes.color, roughness: s.glove ? 0.42 : 0.52, sheen: s.glove ? 0.35 : 0.55, sheenRoughness: 0.45, sheenColor: s.sheen,
-      clearcoat: s.glove ? 0.45 : 0.08, clearcoatRoughness: s.glove ? 0.35 : 0.42, specularIntensity: s.glove ? 1 : 0.55,
-      // A touch of warm self-light stands in for light scattered under the skin, so the shadow side is never grey clay.
-      emissive: s.glove ? 0x000000 : s.sss, emissiveIntensity: s.glove ? 0 : 0.11,
-      normalMap: Hand.grain || (Hand.grain = grainNormal()), normalScale: new THREE.Vector2(s.glove ? 0.35 : 0.12, s.glove ? 0.35 : 0.12),
-    });
-    if (this.mesh.material) this.mesh.material.dispose();
+    const s = SKINS[name] || SKINS.medium;
+    this.mats ||= {};
+    const m = this.mats[name] ||= skinMaterial(name in SKINS ? name : 'medium', this.T, this.uvMeters);
     this.mesh.material = m;
+    this.capMat ||= new THREE.MeshStandardMaterial({ roughness: 0.8, side: THREE.DoubleSide });
+    this.capMat.color.set(s.cap);
   }
 }
 
-// The artifact host does not serve .glb files, so the models ship as base64 inside a JS module.
+function watchFace() {
+  const S = 512, cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+  const draw = () => {
+    const g = cv.getContext('2d'), c = S / 2, d = new Date();
+    g.fillStyle = '#efe6d2'; g.fillRect(0, 0, S, S);
+    g.strokeStyle = '#2a2116';
+    for (let i = 0; i < 60; i++) {
+      const a = i * Math.PI / 30, r0 = i % 5 ? 216 : 192;
+      g.lineWidth = i % 5 ? 4 : 12; g.beginPath(); g.moveTo(c + Math.sin(a) * r0, c - Math.cos(a) * r0); g.lineTo(c + Math.sin(a) * 236, c - Math.cos(a) * 236); g.stroke();
+    }
+    const hand = (a, len, w) => { g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); g.moveTo(c, c); g.lineTo(c + Math.sin(a) * len, c - Math.cos(a) * len); g.stroke(); };
+    const m = d.getMinutes() + d.getSeconds() / 60, h = (d.getHours() % 12) + m / 60;
+    g.strokeStyle = '#1c150e'; hand(h * Math.PI / 6, 120, 18); hand(m * Math.PI / 30, 184, 12);
+    g.fillStyle = '#b08d4a'; g.beginPath(); g.arc(c, c, 16, 0, Math.PI * 2); g.fill();
+    t.needsUpdate = true;
+  };
+  draw(); setInterval(draw, 30000);
+  return t;
+}
+
 export async function loadHands() {
-  const { LEFT, RIGHT } = await import('./hands-data.js');
-  const loader = new GLTFLoader();
-  const buf = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer;
-  const [l, r] = await Promise.all([LEFT, RIGHT].map((s) => loader.parseAsync(buf(s), '')));
-  return { left: new Hand(l.scene, 'left'), right: new Hand(r.scene, 'right') };
+  const gltf = new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath(DRACO));
+  const tl = new THREE.TextureLoader();
+  const tex = (name, srgb = false, repeat = false) => tl.loadAsync(MODELS + name).then((t) => {
+    t.flipY = false; t.anisotropy = 8; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
+  });
+  const [l, r, albedo, height, orm, gloveH, pores, leather] = await Promise.all([
+    gltf.loadAsync(MODELS + 'hand_left.glb'), gltf.loadAsync(MODELS + 'hand_right.glb'),
+    tex('hand_albedo.webp', true), tex('hand_height.webp'), tex('hand_orm.webp'), tex('hand_glove_h.webp'),
+    tex('hand_pores.webp', false, true), tex('hand_leather.webp', false, true),
+  ]);
+  const T = { albedo, height, orm, gloveH, pores, leather };
+  return { left: new Hand(l.scene, 'left', T), right: new Hand(r.scene, 'right', T) };
 }
