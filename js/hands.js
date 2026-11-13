@@ -16,7 +16,7 @@ const THUMB = ['metacarpal', 'phalanx-proximal', 'phalanx-distal', 'tip'];
 // (palms and nails take less of it, as on real hands). `wrap` is how far direct light bleeds past the terminator per
 // channel (red furthest), a cheap stand-in for light scattered under the skin.
 export const SKINS = {
-  light: { gain: [1.3, 1.42, 1.5], wrap: [0.5, 0.24, 0.16], sss: 0xd07058, sheen: 0xd8a898, spec: 0.5, cap: 0x4a3028 },
+  light: { gain: [1.55, 1.75, 1.85], wrap: [0.5, 0.24, 0.16], sss: 0xd07058, sheen: 0xd8a898, spec: 0.5, cap: 0x4a3028 },
   medium: { gain: [1, 1, 1], wrap: [0.48, 0.22, 0.15], sss: 0xb0503a, sheen: 0xb88878, spec: 0.5, cap: 0x3a2218 },
   deep: { gain: [0.3, 0.25, 0.23], wrap: [0.4, 0.18, 0.12], sss: 0x5a2418, sheen: 0x5a4038, spec: 0.55, cap: 0x1c100a },
   gloves: { glove: true, color: 0x2a1c14, wrap: [0.1, 0.08, 0.08], spec: 0.85, cap: 0x0e0a08 },
