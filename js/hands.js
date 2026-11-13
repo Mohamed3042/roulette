@@ -124,7 +124,8 @@ function tweedMaps(base, fleckCol) {
   const b = new THREE.Color(base), f = new THREE.Color(fleckCol);
   const br = b.r * 255, bg = b.g * 255, bb = b.b * 255;
   for (let i = 0; i < S * S; i++) {
-    const v = 0.72 + 0.5 * h[i], k = Math.min(1, fleck[i]);
+    // the twill and the yarn colour carry real contrast (dark wool reads as cloth only by its weave)
+    const v = 0.58 + 0.8 * h[i], k = Math.min(1, fleck[i] * 1.3);
     img.data[i * 4] = Math.min(255, br * v * (1 - k) + f.r * 255 * k);
     img.data[i * 4 + 1] = Math.min(255, bg * v * (1 - k) + f.g * 255 * k);
     img.data[i * 4 + 2] = Math.min(255, bb * v * (1 - k) + f.b * 255 * k);
@@ -286,7 +287,10 @@ class Hand {
     // Jacket sleeve: tapers from the hem to the elbow; a little ease bunches above the hem; two soft folds near the elbow.
     const J = JACKET, ramp = (y) => smooth(HEM_Y, HEM_Y + 0.3, y);
     const folds = (ph, y) => {
+      // ease above the hem: two soft rolls, each partly in and partly out, so the sleeve keeps its size
       let d = 0.0016 * Math.exp(-(((y - HEM_Y - 0.035 - 0.006 * Math.sin(ph * 2 + 0.6)) / 0.012) ** 2)) * (0.5 + 0.5 * Math.cos(ph - 0.8));
+      d += 0.0011 * Math.exp(-(((y - HEM_Y - 0.075 - 0.01 * Math.sin(ph * 1.5 + 2.1)) / 0.014) ** 2)) * Math.cos(ph * 2 - 0.4);
+      d -= 0.0007 * Math.exp(-(((y - HEM_Y - 0.012) / 0.006) ** 2)) * (0.5 + 0.5 * Math.cos(ph * 3 + 1.0));
       d += 0.0022 * Math.exp(-(((y - 0.2 - 0.03 * Math.cos(ph)) / 0.03) ** 2)) * (0.55 + 0.45 * Math.sin(ph * 2 + 1.1));
       d += 0.0018 * Math.exp(-(((y - 0.3 + 0.025 * Math.sin(ph)) / 0.028) ** 2)) * (0.5 + 0.5 * Math.cos(ph * 3 + 0.4));
       d += 0.0012 * Math.sin(ph * 5 + y * 40) * smooth(0.1, 0.3, y);
@@ -296,20 +300,36 @@ class Hand {
     const tw = tweedMaps(sleeve, '#b8ab90');
     const circ = Math.PI * (J.a0 + J.b0) * 1.1;
     const jGeo = tubeGeometry({ prof: jProf, A: (y) => J.a0 + (J.a1 - J.a0) * ramp(y), B: (y) => J.b0 + (J.b1 - J.b0) * ramp(y), bump: folds, seg: 96, uRep: Math.round(circ / (TWEED_MM / 1000)), vScale: 1000 / TWEED_MM });
-    const jMat = new THREE.MeshPhysicalMaterial({ map: tw.map, normalMap: tw.normal, normalScale: new THREE.Vector2(0.55, 0.55), roughness: 0.9, sheen: 1, sheenRoughness: 0.55, sheenColor: new THREE.Color(sleeve).multiplyScalar(1.4), side: THREE.DoubleSide });
+    // Wool sheen: loose fibres catch the light at grazing angles in a pale, slightly warm grey, whatever the dye.
+    const sheenC = new THREE.Color(sleeve).multiplyScalar(1.6).lerp(new THREE.Color(0x8a8472), 0.45);
+    const jMat = new THREE.MeshPhysicalMaterial({ map: tw.map, normalMap: tw.normal, normalScale: new THREE.Vector2(0.95, 0.95), roughness: 0.86, sheen: 1, sheenRoughness: 0.5, sheenColor: sheenC, side: THREE.DoubleSide });
+    // The pressed hem edge: the fold is a little lighter (wear, and it catches the light), with a soft shadow just above.
+    let alongEdge = 0;   // arc length (as the tube's v runs) from the elbow end to the start of the hem's turn
+    for (let j = 1; j < jProf.length && jProf[j][0] >= HEM_Y + 0.0016 - 1e-9; j++) alongEdge += Math.hypot(jProf[j][0] - jProf[j - 1][0], jProf[j][1] - jProf[j - 1][1]);
+    jMat.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+        { float al = vNormalMapUv.y * ${(TWEED_MM / 1000).toFixed(4)} - ${alongEdge.toFixed(5)};
+          diffuseColor.rgb *= 1.0 + 0.45 * smoothstep( -0.0026, -0.0004, al ) * smoothstep( 0.0042, 0.0012, al )
+                                  - 0.22 * exp( -pow( ( al + 0.0045 ) / 0.0016, 2.0 ) ); }`);
+    };
     const jacket = new THREE.Mesh(jGeo, jMat); this.sleeveMesh = jacket;
     // three sleeve buttons on the outer back of the sleeve (horn), kissing
-    const btnMat = new THREE.MeshPhysicalMaterial({ color: 0x2a1d15, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.25 });
-    const btnGeo = new THREE.CylinderGeometry(0.0058, 0.0056, 0.0024, 28);
-    // between the back of the forearm (-Z) and its little-finger side (+X on the right wrist, -X on the left)
-    const bAng = -Math.PI * 0.3;
+    // A turned horn button: rounded rim, dished face, four sewn holes. Quiet dark horn with a polished face.
+    const btnMat = new THREE.MeshPhysicalMaterial({ color: 0x3e2a1c, roughness: 0.32, clearcoat: 0.7, clearcoatRoughness: 0.2 });
+    const btnGeo = new THREE.LatheGeometry([[0, 0.0015], [0.0028, 0.0013], [0.0042, 0.0019], [0.0050, 0.0021], [0.0055, 0.0017], [0.0057, 0.0008], [0.0055, 0]].reverse().map(([r, y]) => new THREE.Vector2(r, y)), 32);
+    const holeGeo = new THREE.CircleGeometry(0.00052, 10).rotateX(-Math.PI / 2), holeMat = new THREE.MeshBasicMaterial({ color: 0x120c08 });
+    btnGeo.userData.holes = [[1, 1], [-1, 1], [1, -1], [-1, -1]].map(([x, z]) => new THREE.Vector3(x * 0.0011, 0.00142, z * 0.0011));
+    // on the outer side of the sleeve, toward the back: the side a pistol grip turns toward the eye (checked in hip and ADS)
+    const bAng = -Math.PI * 0.88;
     for (let k = 0; k < (buttons ? 3 : 0); k++) {
       const y = HEM_Y + 0.03 + k * 0.0112, a = J.a0 + (J.a1 - J.a0) * ramp(y), b = J.b0 + (J.b1 - J.b0) * ramp(y);
       const ph = right ? bAng : -Math.PI - bAng, c = Math.cos(ph), s = Math.sin(ph);
       let nx = c / a, nz = s / b; const l = Math.hypot(nx, nz); nx /= l; nz /= l;
       const btn = new THREE.Mesh(btnGeo, btnMat);
-      btn.position.set(a * c + nx * (folds(ph, y) + 0.0012), y, b * s + nz * (folds(ph, y) + 0.0012));
+      btn.position.set(a * c + nx * (folds(ph, y) + 0.0002), y, b * s + nz * (folds(ph, y) + 0.0002));
       btn.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(nx, 0, nz));
+      btn.rotateY(0.3 + k * 0.7);
+      for (const hp of btnGeo.userData.holes) { const hole = new THREE.Mesh(holeGeo, holeMat); hole.position.copy(hp); btn.add(hole); }
       btn.castShadow = true; jacket.add(btn);
     }
     // The cuff hangs on a pivot at the jacket hem and turns part of the way toward the hand's own axis, so a bent
