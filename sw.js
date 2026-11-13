@@ -1,9 +1,11 @@
 // Offline cache: the shell and phone assets are stored on install; everything else same-origin is cached on first use.
 // Responses come from the cache at once and refresh in the background, so a new push shows on the next open.
-const CACHE = 'roulette-v3';
+const CACHE = 'roulette-v4';
 const SHELL = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',
   'js/main.js', 'js/revolver.js', 'js/hands.js', 'js/hands-data.js', 'js/fx.js', 'js/sound.js', 'js/target.js', 'js/customize.js',
+  'js/range.js', 'js/pistol.js', 'assets/ui/pistol-classic.webp', 'assets/ui/pistol-stainless.webp', 'assets/ui/pistol-black.webp',
+  // The pistol model and its textures (about 1.5 MB) are cached the first time Range opens.
   'assets/models/revolver.glb', 'assets/models/revolver_wear.webp', 'assets/models/revolver_scratch.webp', 'assets/models/revolver_grip_m.webp', 'assets/models/revolver_grip_n.webp',
   'vendor/three/addons/loaders/DRACOLoader.js', 'vendor/three/addons/libs/draco/gltf/draco_decoder.wasm', 'vendor/three/addons/libs/draco/gltf/draco_wasm_wrapper.js',
   'vendor/gsap.min.js', 'vendor/three/three.module.js',

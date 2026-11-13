@@ -202,4 +202,4 @@ body.has-result #coach { opacity: 0 !important; }
 .tap.big::before { left: -40px; top: -40px; width: 80px; height: 80px; }
 @keyframes tap-ring { from { transform: scale(.25); opacity: 1; } to { transform: scale(1.35); opacity: 0; } }
 @keyframes tap-spark { from { transform: rotate(var(--a)) translateY(-8px) scaleY(1); opacity: 1; } to { transform: rotate(var(--a)) translateY(var(--d, -36px)) scaleY(.3); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { * { transition-duration: .01ms !important; } .tap i { display: none; } }
+@media (prefers-reduced-motion: reduce) { * { transition-duration: .01ms !important; } .tap i { display: none; } #reload-btn.pulse { animation: none; } }

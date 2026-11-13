@@ -228,7 +228,7 @@ export function createRange(ctx) {
   add(mats.steel, box(2.7, 0.06, 0.14, 0, CEIL_Y - 0.46, -3.85));
   const flood = new THREE.SpotLight(0xffe2bf, 230, 0, 0.5, 0.8, 2);
   flood.position.set(0, CEIL_Y - 0.54, -3.9); flood.target.position.set(0.1, -0.5, -12.5); room.add(flood, flood.target); lamps.push(flood);
-  const ambient = new THREE.HemisphereLight(0x5f6670, 0x24170e, 0.9); room.add(ambient);
+  const ambient = new THREE.HemisphereLight(0x5f6670, 0x24170e, 1.25); room.add(ambient);
 
   // Merge each material's static geometry into one mesh.
   const KIND = new Map([[mats.floor, 'concrete'], [mats.wall, 'concrete'], [mats.ceil, 'concrete'], [mats.wood, 'wood'], [mats.darkWood, 'wood'], [mats.baffle, 'wood'], [mats.berm, 'berm'], [mats.felt, 'felt'], [mats.steel, 'steel'], [shadeMat, 'steel'], [bulbMat, 'steel']]);
@@ -422,7 +422,7 @@ export function createRange(ctx) {
   const RL = { magOut: 0, np: 1, lh: 0, thumb: 0 };
   const queue = [];   // bullets in flight: { t, fn }
   const tilt = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, k: 0 };
-  const SHOW = { x: -0.02, y: 0.012, z: 0.03, rx: 0.05, ry: -0.42, rz: 0.28 };   // empty gun: turn it a little so the locked-back slide and open port show
+  const SHOW = { x: -0.05, y: 0.005, z: 0, rx: 0.04, ry: -1.1, rz: 0.12 };   // empty gun: turn it a little so the locked-back slide and open port show
   const report = () => ctx.onAmmo?.({ chamber: st.chamber, mag: st.mag, locked: st.locked, reloading: st.reloading });
   const tally = () => ctx.onTally?.(st.hits, st.shots);
 
@@ -671,11 +671,12 @@ export function createRange(ctx) {
   const GRIP = { thumb: [0.7, -0.25, -0.4, 0.05], index: [-0.25, 0.85, 0.45, -0.2], middle: [0.55, 1.3, 1.35, 0], ring: [0.42, 1.15, 0.85, 0], pinky: [0.1, 0.8, 1.1, 0], cup: 0.3 };
   const THUMB_PRESS = [0.35, 0.35, 0.3, 0.2];
   // Support hand (left) in gun space, when aiming: palm on the left grip panel, fingers over the shooting hand's.
-  const SUP = { pos: V(-0.045, -0.02, 0.07), finger: V(0.25, -0.35, -0.9), palm: V(0.95, 0.25, 0.1), elbow: V(-0.1, -0.42, 0.26) };
-  const SUP_POSE = { thumb: [0.35, 0.25, 0.1, 0.05], index: [0.55, 0.9, 0.55, 0.05], middle: [0.6, 1.0, 0.6, 0], ring: [0.65, 1.0, 0.6, 0], pinky: [0.7, 1.0, 0.55, -0.05], cup: 0.35 };
+  const SUP = { pos: V(-0.004, -0.03, 0.05), finger: V(0.2, -0.5, -0.84), palm: V(0.95, 0.25, 0.1), elbow: V(-0.45, -0.3, 0.15) };
+  const SUP_POSE = { thumb: [0.35, 0.25, 0.1, 0.05], index: [0.8, 1.15, 0.6, 0.05], middle: [0.85, 1.2, 0.65, 0], ring: [0.9, 1.2, 0.65, 0], pinky: [0.95, 1.15, 0.6, -0.05], cup: 0.4 };
   // Magazine hand: palm under the base plate, index finger along the front of the magazine.
   const MAGH = { off: V(0, -0.098, 0.036), finger: V(0.1, 0.15, -1), palm: V(0, 1, 0.1), elbow: V(-0.12, -0.35, 0.3) };
   const MAG_POSE = { thumb: [0.3, 0.3, 0.1, 0.1], index: [0.9, 0.5, 0.2, 0.05], middle: [1.1, 1.0, 0.6, 0], ring: [1.15, 1.0, 0.6, 0], pinky: [1.2, 1.0, 0.6, 0], cup: 0.4 };
+  const FORE_ADS = V(0.3, -0.2, 0);   // right forearm direction change when aiming (camera space)
   const REST_L = { pos: V(-0.2, SHELF_Y + 0.024, -0.6), elbow: V(-0.27, SHELF_Y + 0.03, -0.2) };
   const handTmp = { o: new THREE.Object3D(), q: new THREE.Quaternion(), pose: {}, poseR: {} };
 
@@ -770,17 +771,17 @@ export function createRange(ctx) {
     if (RL.lh > 0.001) blend(RL.lh, magPos(RL.np, V()).add(MAGH.off), MAGH.finger, MAGH.palm, MAG_POSE, MAGH.elbow);
     left.apply(pose);
     scene.updateMatrixWorld();
-    const fore = V(0, 0, 1).transformDirection(right.wrist.matrixWorld).add(V().copy(ctx.ELBOW_R).add(V(0.06 * P.ads, -0.4 * P.ads, 0)).multiply(V(mx, 1, 1)).applyQuaternion(cq)).normalize();
+    const fore = V(0, 0, 1).transformDirection(right.wrist.matrixWorld).add(V().copy(ctx.ELBOW_R).addScaledVector(FORE_ADS, P.ads).multiply(V(mx, 1, 1)).applyQuaternion(cq)).normalize();
     right.aimSleeve(right.wrist.getWorldPosition(V()).addScaledVector(fore, 0.3));
     left.aimSleeve(lmir.localToWorld(elbow.clone()));
   }
 
   return {
-    group, gun, sights, ready, tilt, papers, plates, spinner, items, st, RL, RH, GRIP, SUP, SUP_POSE, MAGH, MAG_POSE, REST_L, RELOAD, lamps, flood, ambient, mats,
+    group, gun, sights, ready, tilt, SHOW, papers, plates, spinner, items, st, RL, RH, GRIP, SUP, SUP_POSE, MAGH, MAG_POSE, REST_L, RELOAD, FORE_ADS, lamps, flood, ambient, mats,
     HIP: { land: { x: 0.104, y: -0.09, z: -0.29 }, port: { x: 0.044, y: -0.104, z: -0.37 }, rz: -0.1, D: 9 },
-    ADS_EYE: { land: 0.47, port: 0.5 },
+    ADS_EYE: { land: 0.55, port: 0.58 },
     LOOK: { pitch: -0.035, limY: 0.42, limP: 0.24 },
-    SLEEVE: { sleeve: '#33352f', cuff: '#d8d2c4', watch: false },
+    SLEEVE: { sleeve: '#3a3b34', cuff: '#2a2a27', watch: false },
     GRADE: { vignette: 0.46, grain: 0.045, tint: [1.03, 1.0, 0.95] },
     get env() { return env; },
     get newMag() { return newMag; },
