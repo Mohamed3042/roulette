@@ -1,9 +1,11 @@
 // Offline cache: the shell and phone assets are stored on install; everything else same-origin is cached on first use.
 // Responses come from the cache at once and refresh in the background, so a new push shows on the next open.
-const CACHE = 'roulette-v2';
+const CACHE = 'roulette-v3';
 const SHELL = [
-  './', 'index.html', 'manifest.webmanifest',
-  'js/main.js', 'js/revolver.js', 'js/hands.js', 'js/hands-data.js', 'js/fx.js', 'js/sound.js',
+  './', 'index.html', 'app.css', 'manifest.webmanifest',
+  'js/main.js', 'js/revolver.js', 'js/hands.js', 'js/hands-data.js', 'js/fx.js', 'js/sound.js', 'js/target.js', 'js/customize.js',
+  'assets/models/revolver.glb', 'assets/models/revolver_wear.webp', 'assets/models/revolver_scratch.webp', 'assets/models/revolver_grip_m.webp', 'assets/models/revolver_grip_n.webp',
+  'vendor/three/addons/loaders/DRACOLoader.js', 'vendor/three/addons/libs/draco/gltf/draco_decoder.wasm', 'vendor/three/addons/libs/draco/gltf/draco_wasm_wrapper.js',
   'vendor/gsap.min.js', 'vendor/three/three.module.js',
   'vendor/three/addons/postprocessing/EffectComposer.js', 'vendor/three/addons/postprocessing/RenderPass.js',
   'vendor/three/addons/postprocessing/UnrealBloomPass.js', 'vendor/three/addons/postprocessing/ShaderPass.js',
@@ -18,7 +20,8 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' skips the browser's HTTP cache, so a new version never precaches an old file.
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
