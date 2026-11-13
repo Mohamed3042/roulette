@@ -393,15 +393,18 @@ async function softTrick(name) {
 }
 async function doTrick(name, arg) {
   if (busy) return;
-  const names = Object.keys(TRICKS).filter((n) => n !== lastTrickName);
+  // Random picks (idle, Trick button) never fan an open cylinder; asked for by name, fan closes it first.
+  const names = Object.keys(TRICKS).filter((n) => n !== lastTrickName && !(n === 'fan' && isOpen()));
   name = name || names[securePick(names.length)];
   if (isOpen() && name !== 'flick' && name !== 'fan') name = 'flick';
   busy = true; setUi(); lastTrickName = name;
-  tl = reduced ? softTrick(name) : TRICKS[name](arg);
-  try { await tl; } finally { tl = null; busy = false; lastTrick = performance.now(); setUi(); }
+  const run = reduced ? softTrick(name) : TRICKS[name](arg);
+  tl = run;
+  // A killed trick may still settle later: only the trick that is still current may clear `busy`.
+  try { await run; } finally { if (tl === run) { tl = null; busy = false; lastTrick = performance.now(); setUi(); } }
 }
 function killTrick() {
-  gsap.killTweensOf(P); gsap.killTweensOf(LF); tl = null; busy = false;
+  gsap.killTweensOf(P); gsap.killTweensOf(LF); gsap.killTweensOf(ui.fade); ui.fade.style.opacity = ''; tl = null; busy = false;
   to({ trig: 0, hammer: 0, thumb: 0, grip: 1, duration: 0.2 }); gsap.to(LF, { k: 0, s: 0, duration: 0.3 });
 }
 
@@ -519,10 +522,10 @@ const endPointer = (e) => {
     else { const T = Math.round(cyl.angle / STEP) * STEP; gsap.to(cyl, { angle: T, duration: 0.3, ease: 'back.out(2)' }); }
     if (tap) toggleCylinder();
   } else if (tap && pointer.onGun && !isOpen()) {
-    // One tap opens the cylinder; a second tap within 300 ms turns it into the fan-the-hammer flourish.
+    // One tap opens the cylinder; a second tap within 280 ms turns it into the fan-the-hammer flourish.
     const now = performance.now();
-    if (now - lastTap.t < 300 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 70) { clearTimeout(tapTimer); lastTap.t = 0; doTrick('fan'); }
-    else { lastTap = { t: now, x: e.clientX, y: e.clientY }; clearTimeout(tapTimer); tapTimer = setTimeout(() => toggleCylinder(), 240); }
+    if (now - lastTap.t < 280 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 70) { clearTimeout(tapTimer); lastTap.t = 0; doTrick('fan'); }
+    else { lastTap = { t: now, x: e.clientX, y: e.clientY }; clearTimeout(tapTimer); tapTimer = setTimeout(() => toggleCylinder(), 280); }
   } else if (tap && pointer.onGun) toggleCylinder();
   else if (pointer.onGun && !isOpen() && moved > 45 && dt < 450) {
     // Swipe on the gun: spin it round the trigger finger, in the swipe's direction.

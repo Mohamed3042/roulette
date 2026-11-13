@@ -1,6 +1,6 @@
 // Offline cache: the shell and phone assets are stored on install; everything else same-origin is cached on first use.
 // Responses come from the cache at once and refresh in the background, so a new push shows on the next open.
-const CACHE = 'roulette-v1';
+const CACHE = 'roulette-v2';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest',
   'js/main.js', 'js/revolver.js', 'js/hands.js', 'js/hands-data.js', 'js/fx.js', 'js/sound.js',
@@ -26,12 +26,15 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
-  // Pages are looked up without their query (?debug), so the app opens offline from any start URL.
-  const key = req.mode === 'navigate' ? new Request(new URL('./', location.href)) : req;
+  // The app page is stored once under './' (any query such as ?debug maps to it); other pages keep their own entry.
+  const url = new URL(req.url), root = new URL('./', location.href);
+  const isApp = req.mode === 'navigate' && (url.pathname === root.pathname || url.pathname === root.pathname + 'index.html');
+  const key = isApp ? root.href : req;
   e.respondWith(caches.open(CACHE).then(async (c) => {
-    const hit = await c.match(key, { ignoreSearch: req.mode === 'navigate' });
+    const hit = await c.match(key, { ignoreSearch: isApp });
     const net = fetch(req).then((res) => { if (res.ok) c.put(key, res.clone()); return res; });
     if (hit) { e.waitUntil(net.catch(() => {})); return hit; }
-    return net;
+    // Offline and not cached: a page request still gets the app.
+    return net.catch(async () => (req.mode === 'navigate' && (await c.match(root.href))) || Response.error());
   }));
 });
