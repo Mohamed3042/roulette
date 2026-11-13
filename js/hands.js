@@ -169,7 +169,7 @@ function tubeGeometry({ prof, A, B, bump = () => 0, seg = 64, uRep = 1, vScale =
   }
   for (let j = 0; j < n - 1; j++) for (let i = 0; i < seg; i++) {
     const a = j * (seg + 1) + i, b = a + seg + 1;
-    idx.push(a, b, a + 1, b, b + 1, a + 1);
+    idx.push(a, a + 1, b, b, a + 1, b + 1);   // wound so the outside faces front and the normals point out (shadow normal bias goes the right way)
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(idx);
@@ -266,7 +266,7 @@ class Hand {
   // Forearm (shirt cuff + jacket sleeve) lives in world space and is aimed from the wrist to an elbow point each
   // frame, because the real wrist bends; it rolls with the wrist so the oval keeps to the forearm. The watch rides on
   // the hand's wrist frame. Sleeve-local axes: +Y up the arm, +X the wrist's across axis, +Z toward the palm.
-  dress({ sleeve, cuff, watch, buttons = true }) {
+  dress({ sleeve, cuff, watch, buttons = true, lift = 0 }) {
     if (this.dressing) this.group.children[0].remove(this.dressing);
     this.sleeve ||= new THREE.Group();
     this.sleeve.traverse((o) => { if (o.isMesh && o !== this.cap) { o.geometry.dispose(); o.material.map?.dispose(); o.material.dispose(); } });
@@ -302,15 +302,39 @@ class Hand {
     const jGeo = tubeGeometry({ prof: jProf, A: (y) => J.a0 + (J.a1 - J.a0) * ramp(y), B: (y) => J.b0 + (J.b1 - J.b0) * ramp(y), bump: folds, seg: 96, uRep: Math.round(circ / (TWEED_MM / 1000)), vScale: 1000 / TWEED_MM });
     // Wool sheen: loose fibres catch the light at grazing angles in a pale, slightly warm grey, whatever the dye.
     const sheenC = new THREE.Color(sleeve).multiplyScalar(1.6).lerp(new THREE.Color(0x8a8472), 0.45);
-    const jMat = new THREE.MeshPhysicalMaterial({ map: tw.map, normalMap: tw.normal, normalScale: new THREE.Vector2(0.95, 0.95), roughness: 0.86, sheen: 1, sheenRoughness: 0.5, sheenColor: sheenC, side: THREE.DoubleSide });
+    // The sleeve can end short of its full length (aimSleeve's maxLen): a world-space plane square to the forearm,
+    // shadows included, so a forearm pointing back toward the eye ends at the elbow instead of running past the lens.
+    this.clip ||= new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e3);
+    const jMat = new THREE.MeshPhysicalMaterial({ map: tw.map, normalMap: tw.normal, normalScale: new THREE.Vector2(0.95, 0.95), roughness: 0.86, sheen: 1, sheenRoughness: 0.5, sheenColor: sheenC, side: THREE.DoubleSide, clippingPlanes: [this.clip], clipShadows: true });
     // The pressed hem edge: the fold is a little lighter (wear, and it catches the light), with a soft shadow just above.
     let alongEdge = 0;   // arc length (as the tube's v runs) from the elbow end to the start of the hem's turn
     for (let j = 1; j < jProf.length && jProf[j][0] >= HEM_Y + 0.0016 - 1e-9; j++) alongEdge += Math.hypot(jProf[j][0] - jProf[j - 1][0], jProf[j][1] - jProf[j - 1][1]);
+    // Inside, past the turned-up facing, the sleeve is lined: a smooth satin a shade darker and warmer than the cloth
+    // (the tube's back faces are its inside), so a look into the hem shows a lining, not the back of the tweed.
+    const lining = new THREE.Color(sleeve).multiplyScalar(0.7).lerp(new THREE.Color(0x3a2c22), 0.35);
+    const liftC = new THREE.Color(0xffe2c0).multiplyScalar(lift);
     jMat.onBeforeCompile = (sh) => {
-      sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      sh.uniforms.uLining = { value: lining };
+      sh.fragmentShader = 'uniform vec3 uLining;\n' + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+        bool lined = false;
         { float al = vNormalMapUv.y * ${(TWEED_MM / 1000).toFixed(4)} - ${alongEdge.toFixed(5)};
           diffuseColor.rgb *= 1.0 + 0.45 * smoothstep( -0.0026, -0.0004, al ) * smoothstep( 0.0042, 0.0012, al )
-                                  - 0.22 * exp( -pow( ( al + 0.0045 ) / 0.0016, 2.0 ) ); }`);
+                                  - 0.22 * exp( -pow( ( al + 0.0045 ) / 0.0016, 2.0 ) );
+          lined = !gl_FrontFacing && al < -0.004;
+          if ( lined ) diffuseColor.rgb = uLining; }`)
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        if ( lined ) roughnessFactor = 0.42;`)
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        if ( lined ) normal = normalize( mix( normal, nonPerturbedNormal, 0.85 ) );`)
+        // lift (dim rooms): soft light from overhead on the top of the forearm, falling off underneath, plus a little
+        // grazing rim, both through the weave's own normals, so dark cloth keeps its form and texture
+        .replace('#include <opaque_fragment>', `{ vec3 upV = normalize( ( viewMatrix * vec4( 0.0, 1.0, 0.0, 0.0 ) ).xyz );
+          float top = clamp( 0.5 + 0.5 * dot( normal, upV ), 0.0, 1.0 );
+          float rim = pow( 1.0 - clamp( dot( normal, normalize( vViewPosition ) ), 0.0, 1.0 ), 3.0 );
+          outgoingLight += uLift * diffuseColor.rgb * ( top * top + 0.5 * rim ) * ( lined ? 0.25 : 1.0 ); }
+        #include <opaque_fragment>`);
+      sh.uniforms.uLift = { value: liftC };
+      sh.fragmentShader = 'uniform vec3 uLift;\n' + sh.fragmentShader;
     };
     const jacket = new THREE.Mesh(jGeo, jMat); this.sleeveMesh = jacket;
     // Three kissing sleeve buttons: turned horn with a rounded rim, a dished face and four sewn holes (one mesh for
@@ -364,7 +388,8 @@ class Hand {
     this.group.children[0].add(d); this.dressing = d;
   }
 
-  aimSleeve(elbow) {
+  // maxLen: where the sleeve ends, in metres up the arm from the cuff edge (the whole tube is JACKET.len).
+  aimSleeve(elbow, maxLen = JACKET.len) {
     if (!this.sleeve) return;
     const mw = this.wrist.matrixWorld, w = this.wrist.getWorldPosition(this._v);
     // the forearm runs between the elbow line and the hand's own axis (wrist +Z): a real wrist bends, but not that far
@@ -378,6 +403,8 @@ class Hand {
     this.sleeve.quaternion.setFromRotationMatrix(this._m);
     this.sleeve.scale.set(1, 1, palm.dot(z) < 0 ? -1 : 1);
     this.sleeve.position.copy(w).addScaledVector(dir, this.cuffAt ?? CUFF_AT);
+    this.clip.normal.copy(dir).negate();
+    this.clip.constant = this.sleeve.position.dot(dir) + Math.min(maxLen, JACKET.len + 0.1);
     // turn the cuff halfway toward the hand's forearm axis (wrist +Z), at most 8 degrees
     const hz = new THREE.Vector3(0, 0, 1).transformDirection(mw);
     const loc = new THREE.Vector3(hz.dot(x), hz.dot(dir), hz.dot(z) * this.sleeve.scale.z).normalize();

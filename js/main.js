@@ -100,6 +100,7 @@ try {
 const DESK_Y = -0.27, PLATE_PITCH = -0.12, PLATE_D = 9, TARGET_K = 4.2 / PLATE_D;
 const canvas = $('#gl');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+renderer.localClippingEnabled = true;   // the sleeves end at the elbow (hands.js aimSleeve)
 const MAX_DPR = 2;
 let quality = 1;
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
