@@ -1,8 +1,11 @@
 const ROOMS = {
   study: { tail: 1.6, cutoff: 1700, tone: 400, color: 'brown' },
   salon: { tail: 1.9, cutoff: 1300, tone: 550, color: 'brown' },
-  atelier: { tail: 1.4, cutoff: 4200, tone: 2000, color: 'pink' }
+  atelier: { tail: 1.4, cutoff: 4200, tone: 2000, color: 'pink' },
+  range: { tail: 1.25, cutoff: 3000, tone: 160, color: 'brown' }
 };
+// Distance falloff for sounds downrange: full up close, never below a third.
+const far = (dist) => Math.max(0.33, Math.min(1, 5 / Math.max(1, dist)));
 const random = (lo, hi) => lo + Math.random() * (hi - lo);
 const unit = value => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
 
@@ -322,6 +325,116 @@ export class Sound {
     this._noise(t + 0.025, 0.035, 0.065, 3700, { q: 1.6 });
   }
 
+  // ---------- Range: the semi-auto and what it hits. All bass-free, like the shot. ----------
+  // A brass-like ring: a few inharmonic partials with short, staggered decays.
+  _ring(t, f0, level, decay, partials = [1, 2.76, 5.4], wet) {
+    partials.forEach((m, i) => {
+      const f = f0 * m * random(0.99, 1.01);
+      if (f > 15000) return;
+      this._tone(t, decay / (1 + i * 0.6), level / (1 + i * 0.8), f, f * 0.998, { attack: 0.001, wet });
+    });
+  }
+
+  // The crack, then the slide's two metallic clacks riding right behind it.
+  pistolShot() {
+    if (!this.ready) return;
+    const t = this._ctx.currentTime;
+    this.shot({ pitch: 1.08 });
+    this._noise(t + 0.018, 0.022, 0.2, 3600, { q: 1.7 });
+    this._noise(t + 0.05, 0.03, 0.26, 2900, { q: 1.9 });
+  }
+
+  slideRack() {
+    if (!this.ready) return;
+    const t = this._ctx.currentTime;
+    this._noise(t, 0.09, 0.2, 2400, { end: 1200, q: 1.1, attack: 0.01 });
+    this._noise(t + 0.1, 0.035, 0.42, 3300, { q: 1.8 });
+    this._ring(t + 0.1, 1900, 0.035, 0.12);
+  }
+
+  magOut() {
+    if (!this.ready) return;
+    const t = this._ctx.currentTime;
+    this._noise(t, 0.025, 0.32, 3400, { q: 2 });
+    this._noise(t + 0.02, 0.14, 0.1, 1800, { end: 800, attack: 0.01 });
+  }
+
+  magIn() {
+    if (!this.ready) return;
+    const t = this._ctx.currentTime;
+    this._noise(t, 0.05, 0.22, 1500, { end: 2600, attack: 0.02 });
+    this._noise(t + 0.05, 0.035, 0.48, 2700, { q: 1.5 });
+    this._noise(t + 0.068, 0.022, 0.3, 4300, { q: 2.2 });
+  }
+
+  slideDrop() {
+    if (!this.ready) return;
+    const t = this._ctx.currentTime;
+    this._noise(t, 0.012, 0.18, 4800, { q: 2 });
+    this._noise(t + 0.03, 0.05, 0.55, 3000, { q: 1.3 });
+    this._ring(t + 0.03, 1450, 0.05, 0.16);
+  }
+
+  // A casing landing: bright brass on concrete, duller on the wooden shelf, a tick on the booth wall.
+  casingTink(level = 1, surface = 'floor') {
+    if (!this.ready || !(level = unit(level))) return;
+    const t = this._ctx.currentTime;
+    if (surface === 'wall') { this._noise(t, 0.03, level * 0.12, 2200, { q: 1.2 }); return; }
+    const wood = surface === 'shelf';
+    this._noise(t, 0.008, level * (wood ? 0.16 : 0.2), wood ? 3000 : 6500, { q: 1.4 });
+    this._ring(t, random(3700, 4300), level * (wood ? 0.035 : 0.075), wood ? 0.07 : 0.32, [1, 1.58, 2.31]);
+  }
+
+  // Steel: delayed by the bullet's flight and the sound's way back, a clear bell-like ring.
+  steelRing(dist = 8, size = 1) {
+    if (!this.ready) return;
+    const t = this._ctx.currentTime + dist / 260 + dist / 343, k = far(dist);
+    const wet = this._rooms[this._room].reverb;
+    this._noise(t, 0.012, 0.5 * k, 5200, { q: 0.9, wet });
+    this._ring(t, random(760, 880) / size, 0.16 * k, 1.1, [1, 2.76, 5.4, 8.93], wet);
+  }
+
+  steelFall(dist = 8) {
+    if (!this.ready) return;
+    const t = this._ctx.currentTime + 0.22 + dist / 343, k = far(dist);
+    this._noise(t, 0.05, 0.22 * k, 1700, { q: 1.1 });
+    this._ring(t, random(560, 640), 0.05 * k, 0.4);
+  }
+
+  canClank(dist = 6) {
+    if (!this.ready) return;
+    const t = this._ctx.currentTime + dist / 260 + dist / 343, k = far(dist);
+    const wet = this._rooms[this._room].reverb;
+    this._noise(t, 0.03, 0.42 * k, 2600, { q: 0.9, wet });
+    this._tone(t, 0.12, 0.06 * k, 1350, 1150, { wet });
+    for (let i = 0; i < 3; i++) this._noise(t + 0.35 + i * random(0.09, 0.16), 0.03, 0.12 * k / (i + 1), random(1800, 2600), { q: 1.2 });
+  }
+
+  glassBreak(dist = 6) {
+    if (!this.ready) return;
+    const t = this._ctx.currentTime + dist / 260 + dist / 343, k = far(dist);
+    const wet = this._rooms[this._room].reverb;
+    this._noise(t, 0.06, 0.55 * k, 5200, { type: 'highpass', wet });
+    for (let i = 0; i < 9; i++) {
+      const at = t + 0.01 + Math.pow(Math.random(), 1.6) * 0.32;
+      this._noise(at, random(0.01, 0.03), random(0.06, 0.16) * k, random(4200, 9000), { q: 2.5 });
+      if (i % 2) this._tone(at, random(0.05, 0.12), 0.018 * k, random(3500, 7000), random(3400, 6800));
+    }
+  }
+
+  dirtHit(dist = 15) {
+    if (!this.ready) return;
+    const t = this._ctx.currentTime + dist / 260 + dist / 343;
+    this._noise(t, 0.08, 0.14 * far(dist), 900, { type: 'lowpass', end: 500 });
+  }
+
+  rangeReset() {
+    if (!this.ready) return;
+    const t = this._ctx.currentTime;
+    this._noise(t, 0.6, 0.06, 900, { end: 1600, attack: 0.15, q: 0.5 });
+    for (let i = 0; i < 4; i++) this._noise(t + 0.25 + i * 0.09, 0.025, 0.1, 2800, { q: 1.6 });
+  }
+
   uiTick() {
     if (this.ready) this._tone(this._ctx.currentTime, 0.025, 0.045, 1150, 850);
   }
@@ -350,7 +463,7 @@ export class Sound {
           { dest, fm: true, attack: 0.01 });
         this._nextBird += random(4, 9);
       }
-    } else {
+    } else if (this._room !== 'range') {
       if (this._nextCrackle < now) this._nextCrackle = now + random(0.2, 1);
       if (this._nextCrackle < horizon) {
         this._noise(this._nextCrackle, random(0.015, 0.045),

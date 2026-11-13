@@ -52,6 +52,25 @@ export function createFx(scene) {
   gapFlash.visible = false; gapFlash.renderOrder = 10; scene.add(gapFlash);
   let flashT = 0, deskY = -0.3;
   const tmp = new THREE.Vector3(), q = new THREE.Quaternion();
+  // Range: sparks off steel (thin additive streaks) and dust puffs off the berm (the smoke pool, tinted).
+  const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffb35c, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false });
+  const sparkGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0, -0.5);
+  const sparks = Array.from({ length: 28 }, () => { const m = new THREE.Mesh(sparkGeo, sparkMat); m.visible = false; m.renderOrder = 11; scene.add(m); return { m, v: new THREE.Vector3(), age: 9, life: 0.3 }; });
+  const SMOKE = new THREE.Color(0xd9d2c6);
+  function emit(origin, dir, n, speed, look) {
+    origin.getWorldPosition ? origin.getWorldPosition(tmp) : tmp.copy(origin);
+    let k = 0;
+    for (const p of puffs) {
+      if (p.age < p.life) continue;
+      p.age = 0; p.life = look.life(); p.size = look.size(); p.grow = look.grow(); p.alpha = look.alpha;
+      p.s.material.color.copy(look.color);
+      p.s.position.copy(tmp);
+      p.v.copy(dir).multiplyScalar(speed * (0.3 + Math.random())).add(new THREE.Vector3((Math.random() - 0.5) * 0.12, (Math.random() - 0.3) * 0.12, (Math.random() - 0.5) * 0.12).multiplyScalar(look.spread));
+      p.s.material.rotation = Math.random() * 6.28; p.s.visible = true;
+      if (++k >= n) break;
+    }
+  }
+  const SMOKE_LOOK = { color: SMOKE, alpha: 0.3, spread: 1, life: () => 1.2 + Math.random() * 1.2, size: () => 0.01 + Math.random() * 0.015, grow: () => 0.05 + Math.random() * 0.07 };
 
   return {
     setDesk(y) { deskY = y; },
@@ -70,15 +89,19 @@ export function createFx(scene) {
       node.getWorldPosition(tmp);
       gapFlash.position.copy(tmp); gapFlash.scale.set(0.09 * scale, 0.035 * scale, 1); gapFlash.material.rotation = (Math.random() - 0.5) * 0.3; gapFlash.visible = true;
     },
-    smoke(origin, dir, n = 14, speed = 0.7) {
-      origin.getWorldPosition ? origin.getWorldPosition(tmp) : tmp.copy(origin);
+    smoke(origin, dir, n = 14, speed = 0.7) { emit(origin, dir, n, speed, SMOKE_LOOK); },
+    // A puff of berm dust or concrete grit where a bullet lands: bigger, browner, slower than gun smoke.
+    dust(point, normal, n = 5, color = 0x8a7458, scale = 1) {
+      emit(point, normal, n, 0.45 * scale, { color: new THREE.Color(color), alpha: 0.42, spread: 2.5 * scale,
+        life: () => 0.9 + Math.random() * 0.9, size: () => (0.04 + Math.random() * 0.05) * scale, grow: () => (0.25 + Math.random() * 0.3) * scale });
+    },
+    sparks(point, normal, n = 9) {
       let k = 0;
-      for (const p of puffs) {
-        if (p.age < p.life) continue;
-        p.age = 0; p.life = 1.2 + Math.random() * 1.2; p.size = 0.01 + Math.random() * 0.015; p.grow = 0.05 + Math.random() * 0.07;
-        p.s.position.copy(tmp);
-        p.v.copy(dir).multiplyScalar(speed * (0.3 + Math.random())).add(new THREE.Vector3((Math.random() - 0.5) * 0.12, (Math.random() - 0.3) * 0.12, (Math.random() - 0.5) * 0.12));
-        p.s.material.rotation = Math.random() * 6.28; p.s.visible = true;
+      for (const s of sparks) {
+        if (s.age < s.life) continue;
+        s.age = 0; s.life = 0.12 + Math.random() * 0.22;
+        s.m.position.copy(point); s.m.visible = true;
+        s.v.copy(normal).multiplyScalar(1.5 + Math.random() * 3).add(new THREE.Vector3((Math.random() - 0.5) * 5, (Math.random() - 0.2) * 4, (Math.random() - 0.5) * 5));
         if (++k >= n) break;
       }
     },
@@ -103,7 +126,15 @@ export function createFx(scene) {
         p.v.multiplyScalar(Math.exp(-dt * 2.4)); p.v.y += dt * 0.05;
         p.s.position.addScaledVector(p.v, dt);
         p.s.scale.setScalar(p.size + p.grow * Math.sqrt(k));
-        p.s.material.opacity = Math.min(1, k * 12) * (1 - k) * 0.3;
+        p.s.material.opacity = Math.min(1, k * 12) * (1 - k) * (p.alpha ?? 0.3);
+      }
+      for (const s of sparks) {
+        if (s.age >= s.life) continue;
+        s.age += dt;
+        if (s.age >= s.life) { s.m.visible = false; continue; }
+        s.v.y -= 9.8 * dt; s.m.position.addScaledVector(s.v, dt);
+        const fade = 1 - s.age / s.life, len = s.v.length() * 0.016 * fade + 0.004;
+        s.m.lookAt(tmp.copy(s.m.position).add(s.v)); s.m.scale.set(0.0035 * fade + 0.001, 0.0035 * fade + 0.001, len);
       }
       for (const b of bits) {
         if (b.age > 1.6) { b.m.visible = false; continue; }

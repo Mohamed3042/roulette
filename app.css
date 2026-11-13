@@ -67,6 +67,39 @@ body.touch .round { display: flex; }
 #spin-btn { left: var(--gl); bottom: calc(var(--gb) + 18px); }
 @media (max-width: 560px) { .mark { display: none; } #custom-btn span { display: none; } #custom-btn { width: 44px; padding: 0; justify-content: center; } }
 
+@media (max-width: 440px) { #count .lbl { display: none; } }
+
+/* Mode switch: one big two-way pill, a gold thumb slides under the active side. */
+.mode { position: relative; display: grid; grid-template-columns: 1fr 1fr; height: 44px; border-radius: 999px; border: 1px solid var(--line); box-sizing: border-box;
+  background: var(--panel); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); overflow: hidden; }
+.mode::before { content: ""; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 999px; background: linear-gradient(#f4dea4, #d9b86c);
+  box-shadow: 0 1px 6px rgba(0,0,0,.35); transition: transform .32s cubic-bezier(.3,.8,.3,1); }
+[data-mode="range"] .mode::before { transform: translateX(calc(100% - 0px)); }
+.mode button { position: relative; z-index: 1; min-width: 74px; height: 42px; padding: 0 14px; border: 0; background: none; font-size: 16px; letter-spacing: .05em; color: var(--text); transition: color .25s; }
+.mode button[aria-checked="true"] { color: #20160b; }
+.mode button:focus-visible { outline-offset: -4px; border-radius: 999px; }
+
+/* Range HUD: the round counter (chamber + seven in the magazine), a quiet tally, the phone's Reload button. */
+#ammo { position: absolute; right: var(--gr); bottom: var(--gb); display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; column-gap: 12px; align-items: center;
+  color: #f3e9d4; text-shadow: 0 1px 8px rgba(0,0,0,.7); pointer-events: none; }
+#ammo .n { grid-row: span 2; font: 400 46px/1 var(--display); min-width: 1ch; text-align: right; font-variant-numeric: tabular-nums; }
+#ammo .pips { display: flex; gap: 4px; align-items: flex-end; }
+#ammo .pips i { width: 5px; height: 16px; border-radius: 2px 2px 1px 1px; background: rgba(243,233,212,.2); box-shadow: inset 0 0 0 1px rgba(243,233,212,.25); }
+#ammo .pips i.on { background: linear-gradient(#f1d897, #b8893c); box-shadow: none; }
+#ammo .pips i.ch { width: 7px; height: 10px; border-radius: 50%; margin-right: 5px; align-self: center; }
+#ammo .s { font: italic 400 15px/1.2 var(--serif); color: var(--muted); min-height: 18px; }
+#ammo.empty .n { color: #e8a272; }
+#tally { position: absolute; right: var(--gr); top: calc(var(--gt) + 62px); font: 400 16px/1 var(--serif); letter-spacing: .06em; color: rgba(243,233,212,.78);
+  text-shadow: 0 1px 6px rgba(0,0,0,.8); pointer-events: none; white-space: nowrap; }
+#tally span { font-variant-numeric: tabular-nums; color: #f3e9d4; }
+#tally i { font-style: normal; opacity: .5; margin: 0 4px; }
+#reload-btn { left: var(--gl); bottom: calc(var(--gb) + 18px); }
+#reload-btn.pulse { animation: reload-pulse 1.1s ease-in-out infinite; border-color: #f1d897; }
+@keyframes reload-pulse { 50% { background: rgba(241, 216, 151, .4); } }
+body.touch #ammo { right: auto; left: 50%; transform: translateX(-50%); bottom: calc(var(--gb) + 10px); }
+@media (max-width: 560px) { #reset-btn span { display: none; } #reset-btn { width: 44px; padding: 0; justify-content: center; } }
+@media (max-width: 1100px) { body:not(.touch).range #keys { left: var(--gl); transform: none; justify-content: flex-start; max-width: calc(100% - 220px); } }
+
 #hint { position: fixed; left: 50%; bottom: calc(var(--gb) + 40px); transform: translate(-50%, 8px); width: max-content; max-width: calc(100% - 32px); text-align: center; z-index: 7;
   font: italic 400 19px/1.3 var(--serif); color: #f3e9d4; text-shadow: 0 1px 6px rgba(0,0,0,.85); opacity: 0; transition: opacity .5s, transform .5s; pointer-events: none; }
 #hint.show { opacity: .95; transform: translate(-50%, 0); }
