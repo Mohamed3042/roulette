@@ -80,7 +80,7 @@ const S = {
   targets: store.get('targets', { paper: true, steel: true, bottles: true, spinner: true }),
 };
 // The Decide | Range switch shows once the range is verified; ?range shows it early.
-const RANGE_READY = false;
+const RANGE_READY = true;
 const RANGE_ON = RANGE_READY || params.has('range');
 if (!RANGE_ON || !['decide', 'range'].includes(S.mode)) S.mode = 'decide';
 if (!['classic', 'stainless', 'black'].includes(S.pistolLook)) S.pistolLook = 'classic';
