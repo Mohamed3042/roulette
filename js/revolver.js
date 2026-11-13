@@ -70,21 +70,21 @@ const STEEL_LOOKS = {
     srcRough: 0.15, srcLum: 0.2, iri: 0, iriNm: 330, env: [1.12, 1.2, 1.34],
   },
   stainless: {
-    base: lin(0xa19f9a), pat: lin(0x9a9893), thin: lin(0xa8a7a2), worn: lin(0xc0bfbb), cav: lin(0x34332f), rustC: lin(0x9a9893),
-    rBase: 0.36, rWorn: 0.24, rCav: 0.55, mBase: 1.0, mWorn: 1.0,
-    edge: 0.5, thinAmt: 0.1, scratch: 0.2, brush: 0.25, cavAmt: 0.5, patina: 0.15, grey: 0, speck: 0, rust: 0, cc: 0.0, ccR: 0.3, caseAmt: 0.0,
-    srcRough: 0.45, srcLum: 1.0, iri: 0, iriNm: 300, env: [1, 1, 1],
+    base: lin(0xa8adb3), pat: lin(0xa0a5ab), thin: lin(0xa6abb0), worn: lin(0xb4b8bd), cav: lin(0x2e3034), rustC: lin(0x979ca2),
+    rBase: 0.34, rWorn: 0.26, rCav: 0.55, mBase: 1.0, mWorn: 1.0,
+    edge: 0.35, thinAmt: 0.0, scratch: 0.15, brush: 0.25, cavAmt: 0.5, patina: 0.12, grey: 0, speck: 0, rust: 0, cc: 0.0, ccR: 0.3, caseAmt: 0.0,
+    srcRough: 0.45, srcLum: 0.6, iri: 0, iriNm: 300, env: [1.15, 1.32, 1.55],
   },
   nickel: {
-    base: lin(0xd0d2d4), pat: lin(0xc2c0bb), thin: lin(0xc8cacc), worn: lin(0xeaebec), cav: lin(0x3a3a3a), rustC: lin(0xc2c0bb),
-    rBase: 0.2, rWorn: 0.12, rCav: 0.5, mBase: 1.0, mWorn: 1.0,
-    edge: 0.45, thinAmt: 0.25, scratch: 0.28, brush: 0.05, cavAmt: 0.75, patina: 0.3, grey: 0, speck: 0, rust: 0, cc: 0.0, ccR: 0.3, caseAmt: 0.0,
-    srcRough: 0.15, srcLum: 0.45, iri: 0, iriNm: 300, env: [1, 1, 1],
+    base: lin(0xe4e2dc), pat: lin(0xdad7d0), thin: lin(0xe8e6e0), worn: lin(0xf0eee9), cav: lin(0x4a4a48), rustC: lin(0xdad7d0),
+    rBase: 0.22, rWorn: 0.16, rCav: 0.5, mBase: 1.0, mWorn: 1.0,
+    edge: 0.3, thinAmt: 0.0, scratch: 0.15, brush: 0.0, cavAmt: 0.6, patina: 0.15, grey: 0, speck: 0, rust: 0, cc: 0.0, ccR: 0.3, caseAmt: 0.0,
+    srcRough: 0.1, srcLum: 0.25, iri: 0, iriNm: 300, env: [2.1, 2.1, 2.15],
   },
 };
 const GRIP_LOOKS = {
   service: { dark: lin(0x100704), light: lin(0x321b0e), hi: lin(0x5a3820), grain: 1.0, rough: 0.46, roughChk: 0.7, cc: 0.32, ccR: 0.3, normal: 'checker', nScale: 1.0 },
-  stainless: { dark: lin(0x0b0b0b), light: lin(0x141414), hi: lin(0x1c1c1c), grain: 0.0, rough: 0.78, roughChk: 0.78, cc: 0.0, ccR: 0.6, normal: 'stipple', nScale: 0.7 },
+  stainless: { dark: lin(0x060606), light: lin(0x0a0a0a), hi: lin(0x0d0d0d), grain: 0.0, rough: 0.86, roughChk: 0.86, cc: 0.0, ccR: 0.6, normal: 'stipple', nScale: 0.7, spec: 0.22, specC: 0xb4c0d0 },
   nickel: { dark: lin(0xcdbf9f), light: lin(0xece5d3), hi: lin(0xf4efe3), grain: 0.25, rough: 0.3, roughChk: 0.42, cc: 0.45, ccR: 0.25, normal: 'checker', nScale: 0.6 },
 };
 const MEDAL_LOOKS = { service: [0xb9b2a4, 0.42], stainless: [0xb9b8b4, 0.3], nickel: [0xc9a35c, 0.3] };
@@ -245,7 +245,7 @@ function applyGripLook(m, L, A, stipple) {
   const nm = L.normal === 'checker' ? A.gripN : L.normal === 'stipple' ? stipple : null;
   if (m.normalMap !== nm) { m.normalMap = nm; m.needsUpdate = true; }
   m.normalScale.set(L.nScale, -L.nScale);
-  m.clearcoat = L.cc; m.clearcoatRoughness = L.ccR;
+  m.clearcoat = L.cc; m.clearcoatRoughness = L.ccR; m.specularIntensity = L.spec ?? 1; m.specularColor.setHex(L.specC ?? 0xffffff);   // rubber: weak, cool sheen
 }
 
 // ---------------------------------------------------------------- canvas textures (headstamp, brushing, stipple)
