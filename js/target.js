@@ -126,8 +126,8 @@ export function createTarget() {
       return u > 0.02 && u < 0.98 && v > 0.02 && v < 0.98;
     },
     worldAt(u, v) { sheet.updateMatrixWorld(); return sheet.localToWorld(new THREE.Vector3(u - 0.5, v - 0.5, 0.002)); },
-    hit(u, v) {
-      state.holes.push({ x: u * TEX, y: (1 - v) * TEX, r: TEX * 0.0105, seed: (Math.random() * 1e9) | 0 });
+    hit(u, v, size = 1) {
+      state.holes.push({ x: u * TEX, y: (1 - v) * TEX, r: TEX * 0.0105 * size, seed: (Math.random() * 1e9) | 0 });
       if (state.holes.length > 40) state.holes.shift();
       redraw();
       state.vswing -= 3.2; state.vtwist += (u - 0.5) * 2.4;

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pistol preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0806; overflow: hidden; }
+  #bg { position: fixed; inset: -20px; background: url(../assets/plates/study-2k.jpg) center / cover; filter: blur(7px) brightness(.8); }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<canvas id="gl"></canvas>
+<script type="importmap">{ "imports": { "three": "../vendor/three/three.module.js", "three/addons/": "../vendor/three/addons/" } }</script>
+<script type="module">
+// Preview for js/pistol.js: ?look=classic|stainless|black&cam=34|right|left|sights|mag|ammo|front|top&slide=0..1&mag=0..1&empty=1&hammer=0..1&stop=0..1
+import * as THREE from 'three';
+import { createPistol, SLIDE_TRAVEL, HAMMER_FALL, SLIDE_STOP_UP, BARREL_TILT, MAG_AXIS } from '../js/pistol.js';
+
+const q = new URLSearchParams(location.search);
+const num = (k, d) => (q.has(k) ? parseFloat(q.get(k)) : d);
+if (q.get('plain') === '1') { document.getElementById('bg').style.display = 'none'; document.body.style.background = '#b9b9b9'; }   // silhouette check
+const canvas = document.getElementById('gl');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 20);
+
+// Environment like the app: the room photo wrapped into an equirect, plus warm lamp panels.
+const img = new Image(); img.src = '../assets/plates/study-2k.jpg';
+await img.decode();
+function equirect(img) {
+  const W = 1024, H = 512, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  const qq = W / 4, y0 = H * 0.24, h = H * 0.56;
+  const draw = (cx, flip, alpha) => { g.save(); g.globalAlpha = alpha; g.translate(cx, 0); g.scale(flip ? -1 : 1, 1); g.drawImage(img, -qq * 0.75, y0, qq * 1.5, h); g.restore(); };
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  draw(W * 0.75, true, 0.75); draw(0, true, 0.6); draw(W, true, 0.6); draw(W * 0.5, false, 0.6); draw(W * 0.25, false, 1);
+  g.drawImage(cv, 0, y0, W, 2, 0, 0, W, y0); g.fillStyle = 'rgba(0,0,0,.55)'; g.fillRect(0, 0, W, y0);
+  g.drawImage(cv, 0, y0 + h - 2, W, 2, 0, y0 + h, W, H - y0 - h);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const envScene = new THREE.Scene();
+envScene.add(new THREE.Mesh(new THREE.SphereGeometry(5, 64, 32), new THREE.MeshBasicMaterial({ map: equirect(img), side: THREE.BackSide })));
+const lamp = (w, h, pos, k) => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffc58a).multiplyScalar(k), side: THREE.DoubleSide }));
+  m.position.set(...pos); m.lookAt(0, 0, 0); envScene.add(m);
+};
+lamp(1.2, 0.8, [-2.6, 1.6, -2.2], 9);   // brass desk lamp, upper left front
+lamp(0.8, 0.6, [2.8, 1.2, 1.5], 4);     // dim warm rim, behind right
+lamp(2.4, 0.6, [0, 3.2, 1.0], 3);       // ceiling bounce
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(envScene, 0.02).texture;
+scene.environmentIntensity = num('env', 0.9);
+
+const key = new THREE.SpotLight(0xffb36e, num('key', 3.4), 0, 0.6, 0.9, 0);
+key.position.set(-0.6, 0.55, -0.35); key.castShadow = true; key.shadow.mapSize.setScalar(2048); key.shadow.bias = -0.0002; key.shadow.normalBias = 0.002;
+key.shadow.camera.near = 0.2; key.shadow.camera.far = 3; key.shadow.radius = 3;
+scene.add(key, key.target);
+const rim = new THREE.DirectionalLight(0xffcf9a, 0.9); rim.position.set(0.8, 0.5, -1.0); scene.add(rim);
+const front = new THREE.DirectionalLight(0xffe6c8, 0.9); front.position.set(0.4, 0.7, 1.2); scene.add(front);
+scene.add(new THREE.HemisphereLight(0x7a7f88, 0x2a1c12, 0.5));
+
+const gun = createPistol({ look: q.get('look') || 'classic' });
+scene.add(gun.root);
+await gun.ready;
+
+// Poses
+const s = num('slide', 0);
+gun.slide.position.z += SLIDE_TRAVEL * s;
+gun.barrel.rotation.x = BARREL_TILT * s;
+gun.slideStop.rotation.x = SLIDE_STOP_UP * num('stop', s > 0.99 ? 1 : 0);
+gun.hammer.rotation.x = HAMMER_FALL * num('hammer', 0);
+const mo = num('mag', 0);
+gun.magazine.position.addScaledVector(MAG_AXIS, mo * 0.11);
+if (q.get('empty') === '1') { gun.magRound.visible = false; gun.chamberRound.visible = false; }
+if (q.get('chamber') === '0') gun.chamberRound.visible = false;
+for (const k of (q.get('hide') || '').split(',').filter(Boolean)) if (gun[k]) gun[k].visible = false;   // debug: hide=slide,grips
+const ry = num('ry', 0); gun.root.rotation.y = ry;
+
+// Loose parts for the ammo still
+const cam = q.get('cam') || '34';
+const target = new THREE.Vector3(0, 0.005, -0.045);
+if (cam === 'ammo') {
+  const c = gun.makeCasing(), r = gun.makeRound();
+  c.position.set(-0.014, 0, 0); c.rotation.set(0.3, 0.75, 0.15);
+  r.position.set(0.014, 0.0, 0.004); r.rotation.set(Math.PI / 2 - 0.25, 0, 0.35);
+  const g = new THREE.Group(); g.add(c, r); g.position.set(0.3, 0, 0); scene.add(g);
+  target.set(0.3, 0, 0); gun.root.visible = false;
+}
+const CAMS = {
+  '34': [[-0.33, 0.16, 0.22], 35],
+  left: [[-0.42, 0.03, -0.045], 32],
+  right: [[0.42, 0.05, -0.02], 32],
+  front: [[-0.12, 0.08, -0.42], 30],
+  top: [[0.0, 0.42, -0.02], 32],
+  mag: [[-0.3, -0.06, -0.22], 38],
+  port: [[0.17, 0.2, 0.06], 30],
+  ammo: [[0.3, 0.035, 0.11], 30],
+};
+renderer.setSize(innerWidth, innerHeight, false);
+camera.aspect = innerWidth / innerHeight;
+if (cam === 'sights') {
+  scene.updateMatrixWorld(true);
+  const rs = gun.rearSight.getWorldPosition(new THREE.Vector3()), fs = gun.frontSight.getWorldPosition(new THREE.Vector3());
+  const dir = fs.clone().sub(rs).normalize();
+  camera.position.copy(rs).addScaledVector(dir, -num('dist', 0.3)); camera.fov = num('fov', 30); camera.lookAt(fs);
+} else {
+  const [p, fov] = CAMS[cam] || CAMS['34'];
+  if (cam === 'mag') target.set(0, -0.06, -0.01);
+  if (cam === 'port') target.set(0.01, 0.03, -0.01);
+  camera.position.set(...p).multiplyScalar(num('zoom', 1)).add(cam === 'mag' || cam === 'port' ? target : new THREE.Vector3());
+  if (cam === 'ammo') camera.position.set(...p);
+  if (q.has('tz')) { const dz = num('tz', 0) - target.z, dy = num('ty', target.y) - target.y; target.z += dz; target.y += dy; camera.position.z += dz; camera.position.y += dy; }
+  camera.fov = num('fov', fov); camera.lookAt(target);
+}
+camera.updateProjectionMatrix();
+key.target.position.copy(target);
+let frames = 0;
+renderer.setAnimationLoop(() => { renderer.render(scene, camera); if (++frames === 8) window.__ready = true; });
+window.gun = gun; window.THREE = THREE;
+</script>
+</body>
+</html>

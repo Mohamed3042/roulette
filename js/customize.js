@@ -11,7 +11,14 @@ export function createCustomize(ctx) {
   const { S } = ctx;
   const root = document.getElementById('custom'), body = root.querySelector('.c-body'), tabs = root.querySelector('.c-tabs');
   let tab = 'gun', draft = null;
-  tabs.innerHTML = TABS.map(([id, name]) => `<button type="button" role="tab" data-tab="${id}">${name}</button>`).join('');
+  const range = () => ctx.mode?.() === 'range';
+  // Range mode has no rooms or choices: its Gun tab carries the pistol, the targets and the tally.
+  const drawTabs = () => {
+    const list = range() ? TABS.filter(([id]) => id !== 'room' && id !== 'choices') : TABS;
+    tabs.innerHTML = list.map(([id, name]) => `<button type="button" role="tab" data-tab="${id}">${name}</button>`).join('');
+    if (!list.some(([id]) => id === tab)) tab = 'gun';
+  };
+  drawTabs();
   tabs.addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) { ctx.sound.uiTick(); show(b.dataset.tab); } });
   root.querySelector('.c-close').addEventListener('click', close);
   root.addEventListener('click', (e) => { if (e.target === root) close(); });
@@ -21,6 +28,8 @@ export function createCustomize(ctx) {
     ctx.onOpen?.();
     draft = null;
     root.hidden = false;
+    drawTabs();
+    if (range() && (which === 'room' || which === 'choices')) which = 'gun';
     show(which || tab);
     window.gsap?.fromTo(root.querySelector('.c-sheet'), { y: 28, opacity: 0 }, { y: 0, opacity: 1, duration: 0.32, ease: 'power3.out' });
     root.querySelector('.c-close').focus({ preventScroll: true });
@@ -37,7 +46,12 @@ export function createCustomize(ctx) {
   const toggle = (k, label, on) => `<button type="button" class="toggle" data-toggle="${k}" aria-pressed="${on}"><span>${label}</span><i></i></button>`;
 
   const PANELS = {
-    gun: () => tiles(ctx.LOOKS.map((l) => ({ ...l, img: `<img src="assets/ui/gun-${l.id}.webp" alt="" width="480" height="300" loading="lazy">` })), S.look, 'wide'),
+    gun: () => (range()
+      ? tiles(ctx.PISTOL_LOOKS.map((l) => ({ ...l, img: `<img src="assets/ui/pistol-${l.id}.webp" alt="" width="480" height="300" loading="lazy">` })), S.pistolLook, 'wide')
+        + `<div class="c-label">Targets out</div><div class="toggles">${ctx.TARGET_SETS.map((t) => `<button type="button" class="toggle" data-target="${t.id}" aria-pressed="${S.targets[t.id] !== false}"><span>${esc(t.name)}</span><i></i></button>`).join('')}</div>
+        <div class="c-label">Score</div><div class="toggles">${toggle('tally', 'Show hits and shots', S.tally)}</div>
+        <button type="button" class="btn-s wide" data-reset>Reset range</button>`
+      : tiles(ctx.LOOKS.map((l) => ({ ...l, img: `<img src="assets/ui/gun-${l.id}.webp" alt="" width="480" height="300" loading="lazy">` })), S.look, 'wide')),
     hands: () => tiles(SKINS.map((s) => ({ ...s, img: `<img src="assets/ui/hand-${s.id}.webp" alt="" width="300" height="300" loading="lazy" style="background:${s.c}">` })), S.skin, 'square'),
     room: () => tiles(Object.entries(ctx.ROOMS).map(([id, r]) => ({ id, name: r.name, note: r.blurb, img: `<img src="assets/plates/${id}-thumb.jpg" alt="" width="300" height="200" loading="lazy">` })), S.room, 'wide'),
     choices: () => {
@@ -67,7 +81,17 @@ export function createCustomize(ctx) {
     body.querySelectorAll('[data-pick]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
   }));
   const WIRE = {
-    gun: () => pick((id) => ctx.setLook(id)),
+    gun: () => {
+      if (!range()) { pick((id) => ctx.setLook(id)); return; }
+      pick((id) => ctx.setPistolLook(id));
+      body.querySelectorAll('[data-target]').forEach((b) => b.addEventListener('click', () => {
+        const on = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', String(on)); ctx.sound.uiTick(); ctx.setTarget(b.dataset.target, on);
+      }));
+      body.querySelector('[data-toggle="tally"]').addEventListener('click', (e) => {
+        const b = e.currentTarget, on = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', String(on)); ctx.sound.uiTick(); ctx.setTally(on);
+      });
+      body.querySelector('[data-reset]').addEventListener('click', () => { ctx.sound.uiTick(); ctx.resetRange(); });
+    },
     hands: () => pick((id) => ctx.setSkin(id)),
     room: () => pick((id) => ctx.setRoom(id)),
     feel: () => {
