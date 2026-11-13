@@ -1025,7 +1025,7 @@ function update(dt, t, raw) {
     ['pinky', 'ring', 'middle', 'index'].forEach((f, i) => { const ph = (drum - i * 0.11) / 0.22; if (ph > 0 && ph < 1 && !reduced) poseL[f][0] -= Math.sin(ph * Math.PI) * 0.45; });
     left.apply(poseL);
     scene.updateMatrixWorld();
-    const fore = tmpV.set(0, 0, 1).transformDirection(right.wrist.matrixWorld).add(new THREE.Vector3().copy(ELBOW_R).add(new THREE.Vector3(0.06 * P.ads, -0.4 * P.ads, 0)).multiply(new THREE.Vector3(mir.scale.x, 1, 1)).applyQuaternion(camera.getWorldQuaternion(tmpQ))).normalize();
+    const fore = tmpV.set(0, 0, 1).transformDirection(right.wrist.matrixWorld).add(new THREE.Vector3().copy(ELBOW_R).add(new THREE.Vector3(-0.15 * P.ads, -1.2 * P.ads, 0)).multiply(new THREE.Vector3(mir.scale.x, 1, 1)).applyQuaternion(camera.getWorldQuaternion(tmpQ))).normalize();
     right.aimSleeve(right.wrist.getWorldPosition(new THREE.Vector3()).addScaledVector(fore, 0.3));
     left.aimSleeve(lmir.localToWorld(elbowNow.clone()));
   }

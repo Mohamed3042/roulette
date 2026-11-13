@@ -312,7 +312,7 @@ def make_veins(seed):
         pts = [(x + rng.normal(0, .02), 1.02), (x + rng.normal(0, .04), 0.8), (x * 0.85 + 0.08 + rng.normal(0, .04), 0.6), (0.15 + 0.7 * (i / 2) + rng.normal(0, .03), arch_y)]
         lines.append((catmull(pts), 1.0 - 0.15 * i))
     arch = catmull([(-0.15, 0.25), (0.1, arch_y - 0.02), (0.45, arch_y + 0.03), (0.8, arch_y - 0.01), (1.08, 0.3)])
-    lines.append((arch, 1.1))
+    lines.append((arch, 0.75))
     lines.append((catmull([(-0.15, 0.25), (-0.12, 0.0), (-0.05, -0.35), (0.0, -0.8)]), 1.25))     # cephalic, radial side
     lines.append((catmull([(1.08, 0.3), (1.0, 0.0), (0.92, -0.4), (0.9, -0.8)]), 1.15))           # basilic, ulnar side
     lines.append((catmull([(0.45, arch_y + 0.03), (0.42, 0.2), (0.5, -0.1), (0.46, -0.5)]), 0.8))  # small median vein
@@ -397,7 +397,7 @@ def fields(H, P, N):
                 red += 0.6 * gauss(zr + 1.0, 5.0) * gauss(theta, 0.8)
                 wr = sum(gauss(zr - d0 - 2.2 * theta ** 2, 0.22) * a0 for d0, a0 in ((-3.0, .5), (-1.4, .8), (0.2, 1), (1.8, .7), (3.3, .4)))
                 wmask = gauss(theta, 0.8) * gauss(zr, 6.0)
-                h -= 0.00007 * wr * wmask; crease += 0.5 * wr * wmask
+                h -= 0.0001 * wr * wmask; crease += 0.6 * wr * wmask
                 hg -= 0.00025 * (gauss(zr + 2.0 - 2 * theta ** 2, 0.8) + gauss(zr - 2.5 - 2 * theta ** 2, 0.9)) * gauss(theta, 0.9)
             else:
                 size = 1.0 if big else 0.62
@@ -409,7 +409,7 @@ def fields(H, P, N):
                     jit = 0.25 * np.sin(theta * 3.1 + d0 * 1.7)
                     wr = wr + a0 * gauss(zr - d0 * size - curv * theta ** 2 * np.sign(-d0 + 0.5) * 0.6 - jit, 0.17 + 0.05 * size)
                 wmask = gauss(theta, 0.95 * size + 0.15) * gauss(zr - 0.5, 4.6 * size)
-                h -= 0.00011 * wr * wmask; crease += 0.8 * wr * wmask
+                h -= 0.00016 * wr * wmask; crease += 0.9 * wr * wmask
                 padk = gauss(zr - 0.8, 4.2 * size) * gauss(theta, 0.75)
                 h += 0.00035 * padk * size; knuck += padk * size
                 red += (0.85 if big else 0.55) * gauss(zr - 0.5, 4.8 * size) * gauss(theta, 0.85)
@@ -506,15 +506,15 @@ def fields(H, P, N):
             A = np.array([0.42 + 0.06 * (fi - 1.5), -0.25]) * sc; B = np.array([kx, ky]) * sc
             d, t = seg_dist2d(q * sc, A, B)
             vis = smooth(0.25, 0.8, t) * smooth(1.02, 0.9, t) * (1.0 if fi < 3 else 0.6)
-            prof = np.sqrt(np.clip(1 - (d / 0.0026) ** 2, 0, 1))
+            prof = np.clip(1 - (d / 0.0034) ** 2, 0, 1) ** 2
             h += dors * 0.0005 * prof * vis
         # back: knuckle valleys
         # veins (slightly raised, a cool tint)
         for line, s in VEINS:
             c = line * sc; d, al, tot = poly_dist(q * sc, c)
-            wv = 0.0019 * s * (1 + 0.15 * vnoise3(P[pm], 200, 77))
-            prof = np.sqrt(np.clip(1 - (d / wv) ** 2, 0, 1))
-            h += dors * 0.00045 * s * prof
+            wv = 0.0024 * s * (1 + 0.15 * vnoise3(P[pm], 200, 77))
+            prof = np.clip(1 - (d / wv) ** 2, 0, 1) ** 2
+            h += dors * 0.0004 * s * prof * (0.75 + 0.25 * vnoise3(P[pm], 120, 78))
             vein = np.maximum(vein, dors * smooth(1.0, 0.3, d / wv) * min(1, s))
         # back of the hand: faint diamond creases
         h -= dors * 0.00002 * np.clip(1 - np.abs(vnoise3(P[pm], 420, 21)) * 6, 0, 1)
@@ -541,6 +541,7 @@ def fields(H, P, N):
     out['noise_hi'] = fbm3(P, 700, 5, 3)
     out['mottle'] = fbm3(P, 260, 8, 3)
     out['spots'] = np.clip((vnoise3(P, 900, 13) - 0.86) * 9, 0, 1)
+    out['speck'] = vnoise3(P, 1700, 17) * 0.6 + vnoise3(P, 3200, 19) * 0.4
     return out
 
 # ================================================================= BAKE
@@ -616,14 +617,14 @@ save('hand_nx', gx, 90); save('hand_ny', gy, 90)
 
 # ---- albedo (linear "medium" skin), stored sRGB
 vent = F['vent']; red = np.clip(F['red'], 0, 1.5); dark = np.clip(F['dark'], 0, 1.5)
-base_d = np.array([0.43, 0.215, 0.135]); base_v = np.array([0.50, 0.285, 0.20])
+base_d = np.array([0.33, 0.21, 0.165]); base_v = np.array([0.42, 0.285, 0.225])
 col = base_d * (1 - vent[..., None]) + base_v * vent[..., None]
 mott = F['mottle'][..., None]; lo = F['noise_lo'][..., None]
-col = col * (1 + 0.07 * lo + 0.04 * mott * np.array([1.0, 0.8, 0.7]))
-col = col * (1 - red[..., None] * np.array([-0.03, 0.17, 0.18]))                  # redness: less green/blue
-col = col * (1 - 0.30 * np.clip(dark, 0, 1)[..., None] - 0.25 * np.clip(F['crease'], 0, 1.5)[..., None] * np.array([0.9, 1.0, 1.0]))
+col = col * (1 + 0.10 * lo + 0.07 * mott * np.array([1.0, 0.8, 0.7]) + 0.05 * F['speck'][..., None])
+col = col * (1 - red[..., None] * np.array([-0.04, 0.2, 0.17]))                  # redness: less green/blue
+col = col * (1 - 0.32 * np.clip(dark, 0, 1)[..., None] - 0.38 * np.clip(F['crease'], 0, 1.2)[..., None] * np.array([0.85, 1.0, 1.0]))
 vein = F['vein'][..., None]
-col = col * (1 - vein * np.array([0.10, 0.04, -0.03]))
+col = col * (1 - vein * np.array([0.08, 0.0, -0.06]))
 col = col * (1 - 0.18 * F['spots'][..., None] * (1 - vent[..., None]) * np.array([0.8, 1, 1.1]))
 col = col * (1 - 0.06 * F['side'][..., None] * np.array([0.5, 1, 1]))
 nail = F['nail'][..., None]; lun = F['lunula'][..., None]; free = F['free'][..., None]; band = F['band'][..., None]
@@ -634,7 +635,7 @@ nail_c = nail_c * (1 - free) + np.array([0.76, 0.69, 0.58]) * free
 col = col * (1 - nail) + nail_c * nail
 col = col * (0.55 + 0.45 * F['ao'][..., None] ** 0.6)
 alb = fill_pad(lin2srgb(col), mask)
-save('hand_albedo', alb, 88)
+save('hand_albedo', alb, 92)
 
 # ---- ORM: occlusion, roughness, pigment weight, glove stitch mask
 ao = np.clip(F['ao'] * (1 - 0.35 * np.clip(F['crease'], 0, 1)) * (1 - 0.12 * F['side']), 0, 1)
@@ -645,7 +646,7 @@ st = np.clip(F['stitch'], 0, 1)
 orm = np.stack([ao, np.clip(rough, 0, 1), np.clip(pig, 0, 1), st], -1)
 # half resolution
 orm = orm.reshape(ORM_RES, 2, ORM_RES, 2, 4).mean((1, 3)); mh = mask.reshape(ORM_RES, 2, ORM_RES, 2).max((1, 3))
-save('hand_orm', fill_pad(orm, mh), 90)
+save('hand_orm', fill_pad(orm, mh), 96)
 
 # ---- glove relief (leather creases, seams, stitching), half resolution
 hg = (F['hg'] + 0.25 * np.clip(F['h'], -0.0006, 0)).reshape(ORM_RES, 2, ORM_RES, 2).mean((1, 3))
@@ -676,9 +677,9 @@ def periodic_noise(S, scale, seed):
     n = np.real(np.fft.ifft2(np.fft.fft2(w) * k)); return n / (n.std() + 1e-9)
 
 TILE = 512
-# skin: a furrow network (plates about 0.45 mm across over a 12 mm tile), pores at some furrow crossings, fine noise
+# skin: a furrow network (plates about 0.6 mm across over a 16 mm tile), pores at some furrow crossings, fine noise
 F1, F2, ID = voronoi_tile(TILE, 26, 3)
-fur = np.exp(-((F2 - F1) / 0.10) ** 2)
+fur = np.exp(-((F2 - F1) / 0.05) ** 2)
 F1b, F2b, _ = voronoi_tile(TILE, 13, 4)
 fur2 = np.exp(-((F2b - F1b) / 0.07) ** 2)
 rng = np.random.default_rng(5)
@@ -688,7 +689,7 @@ for _ in range(420):
     cx, cy = rng.random(2) * TILE; r = rng.uniform(1.6, 2.6)
     dx = (xs - cx + TILE / 2) % TILE - TILE / 2; dy = (ys - cy + TILE / 2) % TILE - TILE / 2
     pores += np.exp(-(dx * dx + dy * dy) / (r * r)) * rng.uniform(0.5, 1)
-skin = 0.5 - 0.22 * fur - 0.18 * fur2 - 0.25 * np.clip(pores, 0, 1) + 0.05 * periodic_noise(TILE, 40, 6) + 0.05 * periodic_noise(TILE, 9, 7)
+skin = 0.5 - 0.07 * fur - 0.13 * fur2 - 0.3 * np.clip(pores, 0, 1) + 0.035 * periodic_noise(TILE, 40, 6) + 0.05 * periodic_noise(TILE, 12, 7)
 save('hand_pores', np.clip(skin, 0, 1), 100)
 
 # leather: pebbled grain, cells about 0.8 mm over a 20 mm tile, fine pits
@@ -700,5 +701,5 @@ save('hand_leather', np.clip(leather, 0, 1), 100)
 # ================================================================= MESHES
 for side, H in HANDS.items():
     p = os.path.join(WORK, f'hand_{side}.raw.glb'); write_glb(p, H['j'], H['acc'], H['V']); log('wrote', p, os.path.getsize(p))
-json.dump({'uvMeters': UVM, 'slopeMax': SMAX, 'tileSkin': 0.012, 'tileLeather': 0.020}, open(os.path.join(WORK, 'hand_maps.json'), 'w'))
+json.dump({'uvMeters': UVM, 'slopeMax': SMAX, 'tileSkin': 0.016, 'tileLeather': 0.020}, open(os.path.join(WORK, 'hand_maps.json'), 'w'))
 log('done')

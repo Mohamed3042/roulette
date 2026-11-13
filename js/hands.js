@@ -25,7 +25,7 @@ export const SKINS = {
 const MODELS = new URL('../assets/models/', import.meta.url).href;
 const DRACO = new URL('../vendor/three/addons/libs/draco/gltf/', import.meta.url).href;
 // Must match tools/blender/build_hands.py: tile size (px), slope range of the relief maps, physical size of the tiles (m).
-const MAP = { tile: 512, slopeMax: 1.0, tileSkin: 0.012, tileLeather: 0.02 };
+const MAP = { tile: 512, slopeMax: 1.0, tileSkin: 0.016, tileLeather: 0.02 };
 
 // One material per look, on MeshPhysicalMaterial:
 //  - normals from the baked slope maps (u and v) plus a tiled micro relief (pores, or leather grain),
@@ -37,9 +37,9 @@ function skinMaterial(look, T, uvMeters) {
     color: glove ? s.color : 0xffffff, map: glove ? null : T.albedo,
     roughness: glove ? 0.55 : 1, roughnessMap: glove ? null : T.orm, aoMap: T.orm, aoMapIntensity: 1,
     normalMap: glove ? T.gloveNx : T.nx,
-    specularIntensity: s.spec, sheen: glove ? 0.4 : 0.22, sheenRoughness: glove ? 0.45 : 0.6, sheenColor: glove ? 0x6a5848 : 0xc89282,
-    clearcoat: glove ? 0.3 : 0.1, clearcoatRoughness: glove ? 0.42 : 0.36,
-    emissive: glove ? 0x000000 : s.sss, emissiveIntensity: glove ? 0 : 0.03,
+    specularIntensity: s.spec, sheen: glove ? 0.4 : 0.12, sheenRoughness: glove ? 0.45 : 0.7, sheenColor: glove ? 0x6a5848 : 0xc89282,
+    clearcoat: glove ? 0.3 : 0, clearcoatRoughness: 0.42,
+    emissive: glove ? 0x000000 : s.sss, emissiveIntensity: glove ? 0 : 0.02,
   });
   const detail = glove ? T.leather : T.pores;
   m.onBeforeCompile = (sh) => {
@@ -60,7 +60,7 @@ function skinMaterial(look, T, uvMeters) {
         vec2 gd = vec2( texture2D( uDetail, dUv + vec2( dT, 0.0 ) ).r - texture2D( uDetail, dUv - vec2( dT, 0.0 ) ).r,
                         texture2D( uDetail, dUv + vec2( 0.0, dT ) ).r - texture2D( uDetail, dUv - vec2( 0.0, dT ) ).r );
         // fade the micro relief out as its texels shrink below a pixel, so it never shimmers
-        float dFade = clamp( 2.0 - 0.75 * ${MAP.tile}.0 * length( fwidth( dUv ) ), 0.0, 1.0 );
+        float dFade = clamp( 1.6 - 0.12 * ${MAP.tile}.0 * length( fwidth( dUv ) ), 0.25, 1.0 );
         vec3 mapN = vec3( -( g + gd * uDetailK * dFade ), 1.0 );`))
       .replace('#include <lights_physical_pars_fragment>', THREE.ShaderChunk.lights_physical_pars_fragment.replace(
         'reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );',
@@ -113,7 +113,7 @@ function tweedHeight() {
     const tw = 0.5 + 0.5 * Math.cos(ph * Math.PI * 2);
     const seam = Math.min(1, Math.abs((X % 8) - 0) * 1.5, Math.abs(8 - (X % 8)) * 1.5);
     h[i] = (0.55 * tw * tw + 0.25 * n3[i] + 0.2 * n2[i]) * (0.75 + 0.25 * seam);
-    fleck[i] = Math.max(0, nf[i] * 0.6 + n3[i] * 0.5 - 0.78) * 6;
+    fleck[i] = Math.max(0, nf[i] * 0.6 + n3[i] * 0.5 - 0.86) * 4;
   }
   return (tweedH = { h, fleck, S });
 }
@@ -194,9 +194,9 @@ const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a
 
 // Sleeve layout along the arm, in metres from the cuff edge (y = 0), which sits CUFF_AT up the arm from the wrist joint.
 const CUFF_AT = -0.011;          // the wrist joint is ~2 cm up the forearm from the wrist crease; the cuff ends just past it
-const CUFF = { a: 0.0332, b: 0.0242, off: 0.0015 };    // shirt cuff semi-axes (across, back-to-palm); centre toward the palm
+const CUFF = { a: 0.0338, b: 0.0258, off: 0.0015 };    // shirt cuff semi-axes (across, back-to-palm); centre toward the palm
 const HEM_Y = 0.0135;            // jacket hem: 13.5 mm of shirt cuff shows
-const JACKET = { a0: 0.0372, b0: 0.0288, a1: 0.047, b1: 0.04, len: 0.72 };
+const JACKET = { a0: 0.0378, b0: 0.0302, a1: 0.044, b1: 0.037, len: 0.72 };
 
 class Hand {
   constructor(scene, side, T) {
@@ -258,11 +258,10 @@ class Hand {
     this.sleeve.traverse((o) => { if (o.isMesh && o !== this.cap) { o.geometry.dispose(); o.material.map?.dispose(); o.material.dispose(); } });
     this.sleeve.clear();
     const right = this.side === 'right';
-    // The watch sits on the wrist's +X side; the left cuff rides up over it there.
-    const watchSide = watch ? 1 : 0;
-    const bulge = (ph, y) => watchSide * 0.0062 * Math.pow(Math.max(0, Math.cos(ph)), 6) * smooth(0.034, 0.0, y);
+    // On the watch hand the cuff stops a little higher, just above the watch.
+    this.cuffAt = watch ? -0.002 : CUFF_AT;
     const cuffProf = hemProfile(0, 0.0011, 0.06, 0.018, 10);
-    const cuffGeo = tubeGeometry({ prof: cuffProf, A: () => CUFF.a, B: () => CUFF.b, bump: bulge, seg: 72, offZ: CUFF.off, uRep: Math.round((2 * Math.PI * 0.029) / (OXFORD_MM / 1000)), vScale: 1000 / OXFORD_MM });
+    const cuffGeo = tubeGeometry({ prof: cuffProf, A: () => CUFF.a, B: () => CUFF.b, seg: 72, offZ: CUFF.off, uRep: Math.round((2 * Math.PI * 0.029) / (OXFORD_MM / 1000)), vScale: 1000 / OXFORD_MM });
     const cuffMat = new THREE.MeshPhysicalMaterial({ color: cuff, roughness: 0.82, sheen: 0.5, sheenRoughness: 0.6, sheenColor: new THREE.Color(cuff).multiplyScalar(0.9), normalMap: oxfordNormal(), normalScale: new THREE.Vector2(0.35, 0.35), side: THREE.DoubleSide });
     // topstitching 5 mm from the cuff edge: a fine darker line in the cuff's own colour
     cuffMat.onBeforeCompile = (sh) => {
@@ -278,11 +277,10 @@ class Hand {
       d += 0.0022 * Math.exp(-(((y - 0.2 - 0.03 * Math.cos(ph)) / 0.03) ** 2)) * (0.55 + 0.45 * Math.sin(ph * 2 + 1.1));
       d += 0.0018 * Math.exp(-(((y - 0.3 + 0.025 * Math.sin(ph)) / 0.028) ** 2)) * (0.5 + 0.5 * Math.cos(ph * 3 + 0.4));
       d += 0.0012 * Math.sin(ph * 5 + y * 40) * smooth(0.1, 0.3, y);
-      d += watchSide * 0.003 * Math.pow(Math.max(0, Math.cos(ph)), 6) * smooth(HEM_Y + 0.04, HEM_Y, y);
       return d;
     };
     const jProf = hemProfile(HEM_Y, 0.0016, J.len, HEM_Y + 0.05, 40);
-    const tw = tweedMaps(sleeve, '#d9ccb0');
+    const tw = tweedMaps(sleeve, '#b8ab90');
     const circ = Math.PI * (J.a0 + J.b0) * 1.1;
     const jGeo = tubeGeometry({ prof: jProf, A: (y) => J.a0 + (J.a1 - J.a0) * ramp(y), B: (y) => J.b0 + (J.b1 - J.b0) * ramp(y), bump: folds, seg: 96, uRep: Math.round(circ / (TWEED_MM / 1000)), vScale: 1000 / TWEED_MM });
     const jMat = new THREE.MeshPhysicalMaterial({ map: tw.map, normalMap: tw.normal, normalScale: new THREE.Vector2(0.55, 0.55), roughness: 0.9, sheen: 1, sheenRoughness: 0.55, sheenColor: new THREE.Color(sleeve).multiplyScalar(1.4), side: THREE.DoubleSide });
@@ -306,19 +304,18 @@ class Hand {
     const cap = new THREE.Mesh(new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2).scale(CUFF.a - 0.003, 1, CUFF.b - 0.003).translate(0, 0.012, CUFF.off),
       this.capMat ||= new THREE.MeshStandardMaterial({ color: 0x3a2218, roughness: 0.8, side: THREE.DoubleSide }));
     this.sleeve.add(cap); this.cap = cap;
-    const d = new THREE.Group(), w = this.wrist.position;
-    const dorsal = new THREE.Vector3(1, 0, 0).applyQuaternion(this.wrist.quaternion);
-    const along = new THREE.Vector3(0, 0, 1).applyQuaternion(this.wrist.quaternion); // toward the elbow
-    const basis = new THREE.Matrix4().makeBasis(dorsal, along, dorsal.clone().cross(along).normalize());
-    d.quaternion.setFromRotationMatrix(basis); d.position.copy(w);
+    // The watch rides on the wrist bone's frame (X across, Y back of the hand, Z up the arm), on the back of the wrist
+    // just past the cuff, 12 o'clock toward the fingers.
+    const d = new THREE.Group(); d.position.copy(this.wrist.position); d.quaternion.copy(this.wrist.quaternion);
     if (watch) {
-      // strap fitted to the wrist (across 2.75 cm, back-to-palm 2.1 cm half-widths), case on the +X side
-      const strap = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.018, 80, 1, true).scale(0.0284, 1, 0.0218), new THREE.MeshPhysicalMaterial({ color: 0x3b2316, roughness: 0.55, clearcoat: 0.2, side: THREE.DoubleSide }));
-      strap.position.set(0, 0.006, -0.001); d.add(strap);
-      const caseG = new THREE.Group(); caseG.position.set(0.0302, 0.006, -0.001); caseG.rotation.z = -Math.PI / 2; d.add(caseG);
-      caseG.add(new THREE.Mesh(new THREE.CylinderGeometry(0.0175, 0.0185, 0.0075, 96), new THREE.MeshPhysicalMaterial({ color: 0xd9b46a, metalness: 1, roughness: 0.2 })));
-      const face = new THREE.Mesh(new THREE.CircleGeometry(0.0152, 96), new THREE.MeshPhysicalMaterial({ map: watchFace(), roughness: 0.3, clearcoat: 1 }));
-      face.rotation.x = -Math.PI / 2; face.rotation.z = Math.PI / 2; face.position.y = 0.0039; caseG.add(face);
+      const z = -0.013;
+      const strap = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.017, 96, 1, true).rotateX(Math.PI / 2).scale(0.0309, 0.0199, 1),
+        new THREE.MeshPhysicalMaterial({ color: 0x3b2316, roughness: 0.55, clearcoat: 0.2, side: THREE.DoubleSide }));
+      strap.position.set(0, -0.0016, z); d.add(strap);
+      const caseG = new THREE.Group(); caseG.position.set(0, 0.0215, z); d.add(caseG);
+      caseG.add(new THREE.Mesh(new THREE.CylinderGeometry(0.0168, 0.0178, 0.0072, 96), new THREE.MeshPhysicalMaterial({ color: 0xd9b46a, metalness: 1, roughness: 0.2 })));
+      const face = new THREE.Mesh(new THREE.CircleGeometry(0.0146, 96), new THREE.MeshPhysicalMaterial({ map: watchFace(), roughness: 0.3, clearcoat: 1 }));
+      face.rotation.x = -Math.PI / 2; face.rotation.z = Math.PI; face.position.y = 0.0037; caseG.add(face);
       caseG.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     }
     this.group.children[0].add(d); this.dressing = d;
@@ -336,7 +333,7 @@ class Hand {
     const palm = new THREE.Vector3(0, -1, 0).transformDirection(mw);
     this.sleeve.quaternion.setFromRotationMatrix(this._m);
     this.sleeve.scale.set(1, 1, palm.dot(z) < 0 ? -1 : 1);
-    this.sleeve.position.copy(w).addScaledVector(dir, CUFF_AT);
+    this.sleeve.position.copy(w).addScaledVector(dir, this.cuffAt ?? CUFF_AT);
   }
 
   setSkin(name) {
