@@ -59,10 +59,24 @@ sleeve as a tailored oval tube.
   hand's own axis (70/30), and the cuff turns up to 8 degrees further toward the hand on a pivot at the hem.
 - The watch moved onto the back of the left wrist just past the cuff (the cuff on that hand stops 9 mm higher);
   the strap is fitted to the wrist.
-- At aim the right forearm drops more steeply (`js/main.js` ADS elbow offset, `js/range.js` `FORE_ADS`). The Range
-  support forearm (`SUP.elbow` = -0.7, -0.7, -0.35 in camera space) comes up from the lower left corner instead of
-  lying across the screen at gun height; steeper or nearer elbows covered more of the screen, and further-forward ones
-  showed the inside of the hem at the wrist.
+- At aim the right forearm drops more steeply (`js/main.js` ADS elbow offset, `js/range.js` `FORE_ADS`).
+- Range support arm (sleeve round 2): the support hand is canted into a thumbs-forward grip (`SUP.finger` = 0.302,
+  0.302, -0.905 in gun space: fingers up and forward around the shooting hand, the wrist below them), so its forearm
+  continues down and back toward the shooter (`SUP.elbow` = -0.22, -1, 0.3 in camera space) and enters across the
+  bottom edge, converging on the pistol with the right arm. Before, the hand pointed its wrist to the left, so every
+  elbow either lay across the screen at gun height (the "black box") or bent the wrist open.
+- The sleeve can end at the elbow: `aimSleeve(elbow, maxLen)` cuts the tube with a world-space clipping plane square
+  to the forearm (shadows clipped too; `renderer.localClippingEnabled` in `js/main.js`). The Range support sleeve ends
+  0.27 m up the arm at aim (`SUP.len`), so a forearm pointing back toward the eye never runs its 0.72 m tube past the
+  lens; it blends back to the full tube for the rest and the magazine reach.
+- Why the Range sleeves were black: the tube was wound inside out (outside = back faces), so its normals pointed in
+  and the shadow lookup's normal bias pushed every sample into the tube: the sleeves shadowed themselves wherever the
+  key light reached them. The tube is now wound outward; both modes get their lamp light back (Decide sleeves and
+  cuffs are a touch brighter, the weave reads more).
+- Inside, past the turned-up facing, the jacket is lined: a smooth satin a shade darker and warmer than the cloth,
+  with flatter normals and lower roughness, so a look into the hem shows a lining.
+- `lift` (Range jacket: 0.5): a soft overhead fill on the top of the forearm plus a little grazing rim, through the
+  weave normals, so the dark range cloth keeps its form under the lane lamps. Decide uses 0.
 
 Share of a 390 x 844 phone screen covered by sleeve plus cuff (rendered alone, white on black):
 
@@ -71,7 +85,17 @@ Share of a 390 x 844 phone screen covered by sleeve plus cuff (rendered alone, w
 | Decide hip | 2.4 % | 1.8 % |
 | Decide ADS | 16.9 % | 13.4 % |
 | Range hip | 4.4 % | 3.8 % |
-| Range ADS | 19.0 % | 14.9 % (left 5.7, right 9.2); polish round, support arm from the lower left: 15.1 % (left 6.0) |
+| Range ADS | 19.0 % | 14.9 % (left 5.7, right 9.2); polish round: 15.1 % (left 6.0, across the left edge from 64 % of the height down); sleeve round 2: 18.9 % (left 9.7, right 9.1, left edge only below 89 %) |
+
+Measured with only the sleeve and cuff meshes drawn in white over black from the game camera (`renderer.render`,
+fog and background off), pixels above half grey, after `dbg.setAds(true)` plus 1.5 s; Decide hip and ADS measure
+2.0 % and 13.5 % this way, unchanged by round 2.
+
+Round 2 trades area for shape: a support forearm that enters across the bottom edge has to cross 37 % of the screen
+height from the wrist instead of 29 % of its width, at the same 75 mm sleeve width 0.55 m from the eye. Every bottom
+route measured 8 to 15 % for the left sleeve alone (a slimmer tube, 15 % narrower at the elbow end, saved 0.1 %;
+scaling the whole sleeve to 85 % saved 1.3 % but let the wrist show through the cuff), so the 4 % / 12 % goal is not
+reachable at this hand distance and phone field of view without moving the hands or the gun.
 
 ## Maps
 
@@ -132,7 +156,7 @@ scripts kept outside the repo) on `index.html?nosw&debug` with `dbg.noGovernor =
 390 x 844 at DPR 3 (`phone-*`, 1170 x 2532), desktop 1440 x 900 at DPR 1 (`desk-*`). ADS is `dbg.setAds(true)` plus
 1.5 s, open is `dbg.toggleCylinder()` plus 1.8 s, the skins are `setSkin()` on both hands with the cylinder open,
 fire is taken 45 ms after `P.trig` reaches 1, Range is `dbg.setMode('range', true)`, reload is 0.7 s after
-`dbg.R.reload()`. Crops from the phone stills: `crop-hip-hand` 870 px at (300, 1600) of hip, `crop-ads` 920 px at
+`dbg.R.reload()`, Range ADS fire is 45 ms after `dbg.R.fire()` at aim. Crops from the phone stills: `crop-hip-hand` 870 px at (300, 1600) of hip, `crop-ads` 920 px at
 (250, 1450) of ADS, `crop-open-thumb` 900 px at (270, 1500) of open. Customize tiles (`assets/ui/hand-*.webp`, 300 px):
 600 x 600 at DPR 1, UI hidden, `dbg.view = { from: [0.27, 0.04, 0], at: <right wrist in vm space> + (0, 0.004,
 -0.078), fov: 24 }`, scaled down.
@@ -152,5 +176,5 @@ fire is taken 45 ms after `P.trig` reaches 1, Range is `dbg.setMode('range', tru
 - The skin "scattering" is wrapped lighting, not subsurface transport; thin parts never glow red against a lamp.
 - The glove is the hand shape in leather: no fullness at the fingertips, no wrinkles that follow a grip.
 - The sleeve is a rigid tube between the cuff and the elbow line; it does not bunch at the elbow or sag.
-- The Range support sleeve still takes about 6 % of a phone screen at aim: the forearm is close to the eye in a
-  two-handed hold, and every elbow that covered less of the screen either lay across it at gun height or opened the hem.
+- The Range sleeves take about 19 % of a phone screen at aim (support 9.7 %): two forearms at arm's length in a
+  portrait phone view. Less needs the hands further from the eye or a wider field of view, which changes the sights.
