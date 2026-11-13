@@ -75,7 +75,16 @@ const S = {
   choices: store.get('choices', PRESETS.Tonight), lists: store.get('lists', []),
   slowmo: store.get('slowmo', true), muted: store.get('muted', false), vibrate: store.get('vibrate', true),
   crosshair: store.get('crosshair', 'dot'), sens: store.get('sens', 1), lefty: store.get('lefty', false),
+  // Range mode: the semi-auto on the indoor range.
+  mode: store.get('mode', 'decide'), pistolLook: store.get('pistolLook', 'classic'), tally: store.get('tally', true),
+  targets: store.get('targets', { paper: true, steel: true, bottles: true, spinner: true }),
 };
+// The Decide | Range switch shows once the range is verified; ?range shows it early.
+const RANGE_READY = true;
+const RANGE_ON = RANGE_READY || params.has('range');
+if (!RANGE_ON || !['decide', 'range'].includes(S.mode)) S.mode = 'decide';
+if (!['classic', 'stainless', 'black'].includes(S.pistolLook)) S.pistolLook = 'classic';
+if (!S.targets || typeof S.targets !== 'object') S.targets = { paper: true, steel: true, bottles: true, spinner: true };
 if (!ROOMS[S.room]) S.room = 'study';
 if (!LOOKS.some((l) => l.id === S.look)) S.look = 'service';
 const cleanChoices = (a) => (Array.isArray(a) ? a.map((s) => String(s).trim().slice(0, 24)).filter(Boolean).slice(0, 6) : []);
@@ -269,6 +278,7 @@ async function spinMove() {
 }
 
 async function fire() {
+  if (mode === 'range') { if (R && !switching) { sound.unlock(); if (R.fire()) { coach.done('fire'); crossKick(); } } return; }
   if (resultUp) { again(); return; }
   if (busy) { if (tl) killTrick(); else return; }
   if (S.choices.length < 2) { toast('Load at least two choices first.'); custom.open('choices'); return; }
@@ -492,7 +502,7 @@ canvas.addEventListener('pointerdown', (e) => {
   // Two fingers held = aim down the sights.
   if (touches.size >= 2) { pointer.mode = 'two'; clearTimeout(holdTimer); setAds(true); return; }
   if (tl) killTrick();
-  const onGun = !adsWant && nearGun(e.clientX, e.clientY);
+  const onGun = mode !== 'range' && !adsWant && nearGun(e.clientX, e.clientY);
   Object.assign(pointer, { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t0: performance.now(), hist: [], onGun });
   ripple(e.clientX, e.clientY, onGun);
   const c = cylScreen();
@@ -558,6 +568,12 @@ addEventListener('keydown', (e) => {
   sound.unlock(); lastInput = performance.now();
   const k = e.key.toLowerCase();
   if (k === ' ' || k === 'enter') { e.preventDefault(); if (!e.repeat) fire(); }
+  else if (mode === 'range') {
+    if (k === 'r') R?.reload();
+    else if (k === 'x') resetRange();
+    else if (k === 'c') { document.exitPointerLock?.(); custom.open(); }
+    else if (k === 'm') toggleSound();
+  }
   else if (k === 'r') { if (resultUp) again(); else spinMove(); }
   else if (k === 'f') holdStart();
   else if (k === 'o') toggleCylinder();
@@ -576,9 +592,10 @@ const ui = {
   count: $('#count'), countBtn: $('#choices-btn'), soundBtn: $('#sound-btn'), customBtn: $('#custom-btn'),
   adsBtn: $('#ads-btn'), spinBtn: $('#spin-btn'), cross: $('#cross'), keys: $('#keys'), veil: $('#veil'), chrome: $('#chrome'),
 };
+Object.assign(ui, { mode: $('#mode'), reloadBtn: $('#reload-btn'), resetBtn: $('#reset-btn'), ammo: $('#ammo'), tally: $('#tally') });
 function setUi() {
   const n = S.choices.length;
-  ui.count.textContent = `${n} choices`;
+  ui.count.innerHTML = `${n}<span class="lbl"> choices</span>`;
   ui.countBtn.title = S.choices.join(' · ');
   ui.spinBtn.disabled = busy;
 }
@@ -614,6 +631,98 @@ ui.countBtn.addEventListener('click', () => { sound.unlock(); sound.uiTick(); cu
 for (const ev of ['pointerdown']) ui.adsBtn.addEventListener(ev, (e) => { e.preventDefault(); sound.unlock(); try { ui.adsBtn.setPointerCapture(e.pointerId); } catch { /* synthetic */ } setAds(true); coach.wake(); });
 for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) ui.adsBtn.addEventListener(ev, () => setAds(false));
 ui.adsBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+// ---------- Range mode ----------
+let mode = 'decide', R = null, switching = false, rangeLoading = null;
+const KEYS = {
+  decide: ui.keys.innerHTML,
+  range: '<span><kbd>Click</kbd> fire</span><span><kbd>Right</kbd> aim</span><span><kbd>R</kbd> reload</span><span><kbd>X</kbd> reset range</span><span><kbd>C</kbd> customize</span><span><kbd>M</kbd> sound</span>',
+};
+function loadRange() {
+  rangeLoading ||= import('./range.js').then(async (mod) => {
+    R = mod.createRange({
+      scene, camera, vm, lmir, mir, renderer, pmrem, fx, sound, gsap, S, P, reduced,
+      lights: { key, rim, front, hemi },
+      hands: () => hands, orient, lerpPose, REST, ELBOW_R, LQ: () => LQ,
+      portrait: () => portrait, wait, buzz, aimRay, toA, grabPose,
+      recoil(r, z, roll, k, sh) { rec.vr += r; rec.vz += z; rec.vroll += roll; kick.vp += k; shake = Math.max(shake, sh); },
+      flash(v) { grade.uniforms.uFlash.value = v; },
+      onAmmo: drawAmmo, onTally: drawTally,
+      onEmpty() { if (mode === 'range' && !R.busy) hint(coarse ? 'Empty. Tap Reload, or tap again.' : 'Empty. R to reload, or click again.', 3500); },
+    });
+    await R.ready;
+    return R;
+  });
+  return rangeLoading;
+}
+async function setMode(m, instant = false) {
+  if (!RANGE_ON || m === mode || switching) return;
+  if (mode === 'decide' && (busy || HOLD.on)) return;
+  switching = true; sound.unlock();
+  ui.mode.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.mode === m)));
+  hideResult(); setAds(false); hint('');
+  if (!instant) { ui.fade.classList.add('on'); await wait(0.4); }
+  try {
+    if (m === 'range') {
+      if (!R) { $('#veil-status').textContent = 'Opening the range…'; await loadRange(); }
+      gun.root.visible = false; plateRig.visible = false; desk.visible = false;
+      if (scene.environment) scene.environment.dispose();
+      R.enter();
+      const g = R.GRADE; grade.uniforms.uGrain.value = g.grain; grade.uniforms.uTint.value.set(...g.tint);
+      if (hands) for (const h of [hands.left, hands.right]) { h.dress({ ...R.SLEEVE }); scene.add(h.sleeve); }
+      mode = 'range';
+    } else {
+      R?.leave();
+      mode = 'decide';
+      gun.root.visible = true; plateRig.visible = true; desk.visible = true;
+      scene.environment = null; fx.setDesk(DESK_Y);
+      if (hands) { orient(hands.right.group, RH.finger, RH.palm, new THREE.Vector3(0, -1, 0), new THREE.Vector3(-1, 0, 0)); hands.left.group.quaternion.copy(LQ); }
+      await applyRoom(S.room);
+    }
+    S.mode = mode; store.set('mode', mode);
+  } catch (err) { console.error(err); toast('The range could not load. Try again.'); }
+  applyModeUi(); resize();
+  if (!instant) { await wait(0.08); ui.fade.classList.remove('on'); }
+  switching = false;
+  if (mode === 'range' && ready) hint(coarse ? 'Tap to fire. Reload when the slide locks back.' : 'Click to fire. R reloads when the slide locks back.', 4500);
+}
+function applyModeUi() {
+  const range = mode === 'range';
+  document.documentElement.dataset.mode = mode;
+  document.body.classList.toggle('range', range);
+  ui.mode.hidden = !RANGE_ON;
+  ui.mode.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.mode === mode)));
+  ui.countBtn.hidden = range; ui.spinBtn.hidden = range;
+  ui.resetBtn.hidden = ui.reloadBtn.hidden = ui.ammo.hidden = !range;
+  ui.tally.hidden = !range || !S.tally;
+  ui.keys.innerHTML = KEYS[mode];
+  canvas.setAttribute('aria-label', range
+    ? 'First-person view on an indoor shooting range: your hands hold a semi-auto pistol. Paper, steel plates, bottles and a spinner stand downrange.'
+    : 'First-person view: your hand holds a revolver, a paper target stands across the room. Click or tap to fire; the chamber under the hammer is your pick.');
+  if (range) R?.report();
+}
+let ammoKey = '';
+function drawAmmo({ chamber, mag, locked, reloading }) {
+  const key = `${chamber}${mag}${locked}${reloading}`;
+  if (key === ammoKey) return; ammoKey = key;
+  const n = (chamber ? 1 : 0) + mag;
+  ui.ammo.querySelector('.n').textContent = String(n);
+  ui.ammo.querySelector('.pips').innerHTML = `<i class="ch${chamber ? ' on' : ''}"></i>` + Array.from({ length: 7 }, (_, i) => `<i class="${i < mag ? 'on' : ''}"></i>`).join('');
+  ui.ammo.classList.toggle('empty', locked);
+  ui.ammo.querySelector('.s').textContent = reloading ? 'Reloading' : locked ? 'Slide locked' : '';
+  ui.ammo.setAttribute('aria-label', `${n} rounds${locked ? ', slide locked back' : ''}`);
+  ui.reloadBtn.classList.toggle('pulse', locked && !reloading);
+  if (reloading) hint('');
+}
+function drawTally(h, s) { ui.tally.innerHTML = `<span>${h}</span> ${h === 1 ? 'hit' : 'hits'} <i>/</i> <span>${s}</span> ${s === 1 ? 'shot' : 'shots'}`; }
+function resetRange() { if (R && mode === 'range') { R.reset(); toast('Range reset.'); } }
+ui.mode.addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) { sound.uiTick(); setMode(b.dataset.mode); } });
+ui.mode.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  e.preventDefault(); const m = mode === 'range' ? 'decide' : 'range'; setMode(m); ui.mode.querySelector(`[data-mode="${m}"]`).focus();
+});
+ui.reloadBtn.addEventListener('click', () => { sound.unlock(); R?.reload(); });
+ui.resetBtn.addEventListener('click', () => { sound.unlock(); sound.uiTick(); resetRange(); });
+
 function syncSound() { ui.soundBtn.setAttribute('aria-pressed', String(!S.muted)); ui.soundBtn.setAttribute('aria-label', S.muted ? 'Sound off' : 'Sound on'); }
 function toggleSound() { sound.unlock(); S.muted = !S.muted; sound.setMuted(S.muted); store.set('muted', S.muted); syncSound(); custom.refresh(); }
 ui.soundBtn.addEventListener('click', toggleSound);
@@ -755,7 +864,17 @@ const custom = createCustomize({
     if (k === 'crosshair') setCrosshair();
   },
   showCoach() { store.set('coachDone', false); coach.start(true); },
-  clearTarget() { target.clear(); },
+  clearTarget() { if (mode === 'range') R?.papers.forEach((p) => p.clear()); else target.clear(); },
+  mode: () => mode,
+  PISTOL_LOOKS: [{ id: 'classic', name: 'Classic', note: 'Worn blue, walnut' }, { id: 'stainless', name: 'Stainless', note: 'Brushed steel, black grips' }, { id: 'black', name: 'Black', note: 'Nitride, G10' }],
+  TARGET_SETS: [
+    { id: 'paper', name: 'Paper at 5, 10 and 15 m' }, { id: 'steel', name: 'Steel plates' },
+    { id: 'bottles', name: 'Bottles and cans' }, { id: 'spinner', name: 'Spinner' },
+  ],
+  setPistolLook(id) { S.pistolLook = id; store.set('pistolLook', id); R?.setLook(id); },
+  setTarget(k, on) { S.targets = { ...S.targets, [k]: on }; store.set('targets', S.targets); R?.setSets(S.targets); },
+  setTally(on) { S.tally = on; store.set('tally', on); ui.tally.hidden = !(on && mode === 'range'); },
+  resetRange() { resetRange(); },
   sound, toast,
   onOpen() { document.exitPointerLock?.(); setAds(false); hideResult(); },
 });
@@ -793,34 +912,42 @@ function resize() {
   const halfW = Math.atan((T.w * wid) / 2 / PLATE_D), halfH = Math.atan((T.h * (wid / a)) / 2 / PLATE_D);
   look.limY = halfW + 0.07; look.limP = halfH + 0.05;
   LH.desk.x = portrait ? -0.1 : -0.17;
+  if (mode === 'range' && R) {
+    // The range is real 3D: look straight downrange, with room to swing across every target.
+    look.baseYaw = 0; look.basePitch = R.LOOK.pitch; look.limY = R.LOOK.limY; look.limP = R.LOOK.limP;
+    R.REST_L.pos.x = portrait ? -0.13 : -0.2;
+  }
+  setLook(look.ty, look.tp);
 }
 addEventListener('resize', resize);
 
 function hipPose(out) {
-  const H = portrait ? HIP.port : HIP.land;
+  const range = mode === 'range', Hs = range ? R.HIP : HIP, H = portrait ? Hs.port : Hs.land;
   // Point the bore at the crosshair's spot on the paper (converging hip aim).
-  const D = 4.2;
-  const bx = H.x, by = H.y + gun.dims.BORE_Y, bz = H.z;
+  const D = range ? R.HIP.D : 4.2;
+  const bx = H.x, by = H.y + (range ? R.gun : gun).dims.BORE_Y, bz = H.z;
   const dx = 0 - bx, dy = 0 - by, dz = -D - bz, len = Math.hypot(dx, dy, dz);
   out.x = H.x; out.y = H.y; out.z = H.z;
-  out.rx = Math.asin(dy / len); out.ry = Math.atan2(-dx, -dz); out.rz = HIP.rz;
+  out.rx = Math.asin(dy / len); out.ry = Math.atan2(-dx, -dz); out.rz = Hs.rz;
   return out;
 }
 const sightTmp = { a: new THREE.Vector3(), b: new THREE.Vector3() };
 function adsPose(out) {
   // Rear and front sights on the eye's centre line: pitch the gun so the sight line is level, then slide it onto the axis.
-  const rs = sightTmp.a.copy(gun.rearSight.position), fs = sightTmp.b.copy(gun.frontSight.position);
+  const range = mode === 'range';
+  const rs = sightTmp.a.copy(range ? R.sights.rear : gun.rearSight.position), fs = sightTmp.b.copy(range ? R.sights.front : gun.frontSight.position);
   const rx = Math.atan2(fs.y - rs.y, -(fs.z - rs.z));
   const c = Math.cos(-rx), s = Math.sin(-rx);
   const ry_ = rs.y * c - rs.z * s, rz_ = rs.y * s + rs.z * c;
-  const eye = portrait ? ADS_EYE.port : ADS_EYE.land;
+  const EYE = range ? R.ADS_EYE : ADS_EYE, eye = portrait ? EYE.port : EYE.land;
   out.x = -rs.x; out.y = -ry_ - 0.0004; out.z = -eye - rz_;
   out.rx = -rx; out.ry = 0; out.rz = 0;
   return out;
 }
 const hipP = {}, adsP = {};
 function update(dt, t, raw) {
-  updateCylinder(dt);
+  const range = mode === 'range';
+  if (!range) updateCylinder(dt);
   // Springs: recoil (muzzle flip, push back, wrist roll), camera kick, weapon sway.
   rec.vr += (-170 * rec.r - 15 * rec.vr) * dt; rec.r += rec.vr * dt;
   rec.vz += (-220 * rec.z - 18 * rec.vz) * dt; rec.z += rec.vz * dt;
@@ -846,13 +973,14 @@ function update(dt, t, raw) {
   plateU.uBias.value = lerp(0, 2.2, Math.max(adsK, P.act * (isOpen() ? 1 : 0.6)));
   plateU.uFlash.value *= Math.exp(-raw * 14); grade.uniforms.uFlash.value *= Math.exp(-raw * 16);
   plateU.uGain.value = 1 - grade.uniforms.uDim.value * 0.25 - adsK * 0.06;
-  grade.uniforms.uVignette.value = ROOMS[roomId || 'study'].grade.vignette + adsK * 0.18;
+  grade.uniforms.uVignette.value = (range ? R.GRADE : ROOMS[roomId || 'study'].grade).vignette + adsK * 0.18;
 
   // Viewmodel: hip <-> sights by P.ads, then any action pose by P.act, then recoil and sway on top.
   hipPose(hipP); adsPose(adsP);
   const e = adsK * adsK * (3 - 2 * adsK), lift = Math.sin(e * Math.PI) * 0.012;
   for (const k of ['x', 'y', 'z', 'rx', 'ry', 'rz']) current[k] = lerp(lerp(hipP[k], adsP[k], e), A[k], P.act);
   current.y -= lift;
+  if (range) { const k = 1 - P.act; for (const c of ['x', 'y', 'z', 'rx', 'ry', 'rz']) current[c] += R.tilt[c] * k; }
   const sw = 1 - adsK * 0.7;
   vm.position.set(current.x - sway.x * 0.02 * sw, current.y + sway.y * 0.015 * sw + Math.sin(t * 1.1) * 0.0012 * calm * m, current.z + rec.z * 0.045);
   vm.rotation.set(current.rx + rec.r * 0.075 + sway.y * 0.12 * sw + HOLD.pitch, current.ry + sway.x * 0.18 * sw + HOLD.yaw, current.rz - rec.roll * 0.05 + sway.x * 0.08 * sw, 'YXZ');
@@ -868,10 +996,11 @@ function update(dt, t, raw) {
   gun.trigger.rotation.x = P.trig * TRIGGER_PULL;
   // Crosshair: gives way to the sights, opens on a shot.
   crossK *= Math.exp(-raw * 9);
-  ui.cross.style.opacity = String(Math.max(0, 1 - adsK * 2.2) * (1 - P.act) * (busy && !spun ? 0.6 : 1));
+  ui.cross.style.opacity = String(Math.max(0, 1 - adsK * 2.2) * (1 - P.act) * (busy && !spun && !range ? 0.6 : 1));
   ui.cross.style.setProperty('--spread', (1 + crossK * 1.6).toFixed(3));
 
-  if (hands) {
+  if (range) { R.update(dt, raw, t); R.updateHands(raw, t); }
+  else if (hands) {
     const { right, left } = hands;
     right.group.position.copy(RH.pos);
     lerpPose(OPEN, GRIP, P.grip, poseR);
@@ -900,8 +1029,8 @@ function update(dt, t, raw) {
     right.aimSleeve(right.wrist.getWorldPosition(new THREE.Vector3()).addScaledVector(fore, 0.3));
     left.aimSleeve(lmir.localToWorld(elbowNow.clone()));
   }
-  fx.update(dt); target.update(dt);
-  if (hands) updateLabels(raw);
+  fx.update(dt);
+  if (!range) { target.update(dt); if (hands) updateLabels(raw); }
   if (adsWant !== (P.ads > 0.5) || (adsWant && P.ads < 1) || (!adsWant && P.ads > 0)) {
     const want = adsWant && !P.act ? 1 : 0;
     P.ads += clamp(want - P.ads, -raw / 0.16, raw / 0.2);
@@ -947,7 +1076,7 @@ document.addEventListener('visibilitychange', () => {
 
 // ---------- Boot ----------
 let ready = false;
-setCrosshair(); applyHand(); setUi();
+setCrosshair(); applyHand(); setUi(); applyModeUi();
 ui.keys.hidden = coarse;
 document.body.classList.toggle('touch', coarse);
 (async () => {
@@ -961,13 +1090,14 @@ document.body.classList.toggle('touch', coarse);
   for (const x of [hands.left, hands.right]) x.setSkin(S.skin);
   applyChoices();
   await applyRoom(S.room);
+  if (S.mode === 'range') { $('#veil-status').textContent = 'Opening the range…'; await setMode('range', true); }
   await document.fonts.ready;
   ready = true;
   gsap.to(ui.veil, { opacity: 0, duration: 0.8, onComplete: () => { ui.veil.hidden = true; } });
   ui.chrome.hidden = false; gsap.fromTo(ui.chrome, { opacity: 0 }, { opacity: 1, duration: 0.8, delay: 0.3 });
   if (sharedLoaded) toast(`Loaded ${S.choices.length} shared choices.`);
   coach.start();
-  if (!coach.active) hint(coarse ? 'Tap to fire. Hold Aim for the sights.' : 'Click to fire. Hold right click to aim.');
+  if (!coach.active) hint(mode === 'range' ? (coarse ? 'Tap to fire. Reload when the slide locks back.' : 'Click to fire. R reloads when the slide locks back.') : coarse ? 'Tap to fire. Hold Aim for the sights.' : 'Click to fire. Hold right click to aim.');
 })().catch((err) => { $('#veil-status').textContent = 'The room could not load. Refresh to try again.'; console.error(err); });
 frame();
 if ('serviceWorker' in navigator && !params.has('nosw')) {
@@ -977,4 +1107,7 @@ if ('serviceWorker' in navigator && !params.has('nosw')) {
   addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
 if (debug) window.dbg = { P, A, S, HIP, LOAD, ADS_EYE, FOV, RH, GRIP, OPEN, REST, LH, FAN, cyl, gun, target, look, hands: () => hands, camera, rig, vm, mir, renderer, composer, scene, fx, fire, spinMove, toggleCylinder, holdStart, holdEnd, doTrick, setAds, slowmo, key, rim, front, hemi, plate, gsap, THREE, orient, coach, custom, freeze: false, view: null,
-  reorient() { orient(hands.right.group, RH.finger, RH.palm, new THREE.Vector3(0, -1, 0), new THREE.Vector3(-1, 0, 0)); } };
+  reorient() { orient(hands.right.group, RH.finger, RH.palm, new THREE.Vector3(0, -1, 0), new THREE.Vector3(-1, 0, 0)); },
+  setMode, get R() { return R; }, get mode() { return mode; }, resetRange,
+  // Point the view at a world point (tests and stills).
+  aimAt(x, y, z) { look.ty = look.yaw = -Math.atan2(-x, -z) + look.baseYaw; look.tp = look.pitch = Math.atan2(y, Math.hypot(x, z)) - look.basePitch; } };
