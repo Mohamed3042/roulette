@@ -1,18 +1,18 @@
-# Roulette handoff (2026-11-13)
+# Roulette handoff (2026-11-13, v2)
 
-**Goal:** first-person 3D revolver decision toy as a phone web app on GitHub Pages: https://mohamed3042.github.io/roulette/
+**Goal:** first-person 3D revolver decision toy, phone web app on this repo's GitHub Pages site.
 
-**Done (verified with Playwright, 390x844 Chromium + WebKit with touch, 1440x900 Chromium, 0 console errors):**
-- App = v6 from the home folder (MakeHuman hands + procedural revolver); three.js r170, GSAP and fonts vendored, so it runs offline.
-- PWA: `manifest.webmanifest`, icons (192/512/maskable/apple 180), `sw.js` (precaches shell + 1920 px plates; 4K plates only on big screens, cached on use).
-- Gestures: swipe gun = twirl (swipe direction), tap gun = open, double-tap = fan the hammer (left palm, 5 dry clicks), hold = slow inspect with light sweep (drag turns it), flick open cylinder = free spin with ticks, drag/tilt = sway. Ripple + sparks + `navigator.vibrate` on touches.
-- Fire: letterbox, slow-mo, muzzle light on hands/room, recoil, smoke; a "No" chamber gives a dry click, no hole.
-- First-run Tricks card (3 lines). DPR capped at 2, loop pauses when hidden, reduced motion = short fades.
+**Done (Playwright 1440x900 Chromium, 390x844 Chromium + WebKit with touch, 0 console errors):**
+- v2 Decide: mouse aims, left click fires, right click held = aim down the sights; pointer lock, Esc frees. Keys R spin, F inspect, Space fire, E choices, C customize, M sound.
+- Phone: tap scene = fire, Aim button (or two fingers) = sights, drag = look; gestures on the gun keep tap open / double-tap fan / swipe twirl / hold inspect.
+- New revolver (`js/revolver.js`, `assets/models/revolver.glb`, Draco): looks service (worn blued + walnut, default), stainless, nickel.
+- Paper target with lasting holes (`js/target.js`), Customize sheet (`js/customize.js`: gun, hands, room, choices with share link, feel), 3-step coach. SW cache `roulette-v3`; precache 5.4 MB.
+- Stills: `docs/shots/v2/`.
 
-**Not verified:** a real iPhone/Android (tilt signs, iOS motion prompt, haptics, 60 fps, audio by ear). Windows WebKit only renders ~8-25 fps in software and its screenshots go black after a canvas resize (GL readback is fine); real Safari not checked.
+**Pending:** Range mode (semi-auto 1911: `js/pistol.js`, `assets/models/pistol*.{glb,webp}`, `tools/blender/build_pistol.py` exist but are NOT wired in; keep the mode switch hidden until the range is verified).
 
-**Pending:** none asked. Ideas: tilt calibration button; sound for the fan per click.
+**Not verified:** real iPhone/Android (60 fps, haptics, audio by ear). Windows WebKit renders in software (25-55 ms frames).
 
-**Exact next command (local check):** from the folder that holds this repo, `py -m http.server 5291`, then open http://127.0.0.1:5291/roulette/?debug (`?nosw` skips the service worker).
+**Next command:** from the folder holding this repo, `py -m http.server 5291`, open http://127.0.0.1:5291/roulette/?debug&nosw
 
-**Do-not-do:** never copy the old 500 MB scratch folder (`_work`) here; no casino/money theme; the gun only fires at the placard; bump `CACHE` in `sw.js` when shipping changed files; keep the repo free of personal names, paths and keys (it is public).
+**Do-not-do:** no casino/money theme; gun fires only at the paper; never commit reference photos; bump `CACHE` in `sw.js` when shipping changed files; no personal names, paths or keys (public repo).
