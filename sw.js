@@ -8,7 +8,7 @@ const SHELL = [
   // The pistol model and its textures (about 1.5 MB) are cached the first time Range opens.
   'assets/models/revolver.glb', 'assets/models/revolver_wear.webp', 'assets/models/revolver_scratch.webp', 'assets/models/revolver_grip_m.webp', 'assets/models/revolver_grip_n.webp', 'assets/models/revolver_normal.webp', 'assets/models/revolver_detail.webp',
   'assets/models/hand_left.glb', 'assets/models/hand_right.glb', 'assets/models/hand_albedo.webp', 'assets/models/hand_nx.webp', 'assets/models/hand_ny.webp',
-  'assets/models/hand_orm.webp', 'assets/models/hand_glove_nx.webp', 'assets/models/hand_glove_ny.webp', 'assets/models/hand_pores.webp', 'assets/models/hand_leather.webp',
+  'assets/models/hand_orm.webp', 'assets/models/hand_glove_nx.webp', 'assets/models/hand_glove_ny.webp', 'assets/models/hand_glove_st.webp', 'assets/models/hand_pores.webp', 'assets/models/hand_leather.webp',
   'vendor/three/addons/loaders/DRACOLoader.js', 'vendor/three/addons/libs/draco/gltf/draco_decoder.wasm', 'vendor/three/addons/libs/draco/gltf/draco_wasm_wrapper.js',
   'vendor/gsap.min.js', 'vendor/three/three.module.js',
   'vendor/three/addons/postprocessing/EffectComposer.js', 'vendor/three/addons/postprocessing/RenderPass.js',

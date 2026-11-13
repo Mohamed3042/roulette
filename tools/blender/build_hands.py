@@ -12,7 +12,8 @@
 #   assets/models/hand_left.glb and hand_right.glb.
 #   hand_albedo.webp   2048 sRGB, the "medium" skin; other tones are graded in js/hands.js with the pigment mask
 #   hand_nx/ny.webp    2048 grey, macro relief as surface slope along u and v (creases, knuckles, tendons, veins, nail folds)
-#   hand_orm.webp      1024 RGBA: R occlusion, G roughness, B pigment weight (palm and nails take less tone), A glove stitches
+#   hand_orm.webp      1024 RGB: R occlusion, G roughness, B pigment weight (palm and nails take less tone)
+#   hand_glove_st.webp 1024 grey, glove stitch mask
 #   hand_glove_nx/ny   1024 grey, glove relief as slopes (seams, stitching, leather creases at the joints)
 #   hand_pores.webp    512 grey tile, skin micro relief (furrow network, pores)
 #   hand_leather.webp  512 grey tile, pebbled leather grain
@@ -643,15 +644,17 @@ rough = 0.56 + 0.06 * F['knuckle'].clip(0, 1) + 0.05 * F['crease'].clip(0, 1) - 
 rough = rough * (1 - F['nail']) + (0.24 + 0.14 * F['free']) * F['nail']
 pig = (1 - 0.62 * vent) * (1 - 0.85 * F['nail'])
 st = np.clip(F['stitch'], 0, 1)
-orm = np.stack([ao, np.clip(rough, 0, 1), np.clip(pig, 0, 1), st], -1)
+orm = np.stack([ao, np.clip(rough, 0, 1), np.clip(pig, 0, 1)], -1)
 # half resolution
-orm = orm.reshape(ORM_RES, 2, ORM_RES, 2, 4).mean((1, 3)); mh = mask.reshape(ORM_RES, 2, ORM_RES, 2).max((1, 3))
-save('hand_orm', fill_pad(orm, mh), 96)
+orm = orm.reshape(ORM_RES, 2, ORM_RES, 2, 3).mean((1, 3)); mh = mask.reshape(ORM_RES, 2, ORM_RES, 2).max((1, 3))
+save('hand_orm', fill_pad(orm, mh), 90)
 
 # ---- glove relief (leather creases, seams, stitching), half resolution
 hg = (F['hg'] + 0.25 * np.clip(F['h'], -0.0006, 0)).reshape(ORM_RES, 2, ORM_RES, 2).mean((1, 3))
 gx, gy = slopes(hg.astype(np.float64), ORM_RES)
 save('hand_glove_nx', gx, 90); save('hand_glove_ny', gy, 90)
+# stitch mask for the glove thread colour (a separate grey map: browsers premultiply alpha, which would wipe the ORM)
+save('hand_glove_st', fill_pad(st.reshape(ORM_RES, 2, ORM_RES, 2).max((1, 3)), mh), 88)
 
 # ================================================================= DETAIL TILES (periodic)
 def voronoi_tile(S, cells, seed, jitter=0.85):

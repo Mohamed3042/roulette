@@ -16,10 +16,10 @@ const THUMB = ['metacarpal', 'phalanx-proximal', 'phalanx-distal', 'tip'];
 // (palms and nails take less of it, as on real hands). `wrap` is how far direct light bleeds past the terminator per
 // channel (red furthest), a cheap stand-in for light scattered under the skin.
 export const SKINS = {
-  light: { gain: [1.34, 1.46, 1.56], wrap: [0.5, 0.24, 0.16], sss: 0xd07058, spec: 0.5, cap: 0x4a3028 },
-  medium: { gain: [1, 1, 1], wrap: [0.48, 0.22, 0.15], sss: 0xb0503a, spec: 0.5, cap: 0x3a2218 },
-  deep: { gain: [0.4, 0.35, 0.33], wrap: [0.4, 0.18, 0.12], sss: 0x7a3020, spec: 0.6, cap: 0x1c100a },
-  gloves: { glove: true, color: 0x211813, wrap: [0.1, 0.08, 0.08], spec: 0.85, cap: 0x0e0a08 },
+  light: { gain: [1.3, 1.42, 1.5], wrap: [0.5, 0.24, 0.16], sss: 0xd07058, sheen: 0xd8a898, spec: 0.5, cap: 0x4a3028 },
+  medium: { gain: [1, 1, 1], wrap: [0.48, 0.22, 0.15], sss: 0xb0503a, sheen: 0xb88878, spec: 0.5, cap: 0x3a2218 },
+  deep: { gain: [0.3, 0.25, 0.23], wrap: [0.4, 0.18, 0.12], sss: 0x5a2418, sheen: 0x5a4038, spec: 0.55, cap: 0x1c100a },
+  gloves: { glove: true, color: 0x2a1c14, wrap: [0.1, 0.08, 0.08], spec: 0.85, cap: 0x0e0a08 },
 };
 
 const MODELS = new URL('../assets/models/', import.meta.url).href;
@@ -35,24 +35,24 @@ function skinMaterial(look, T, uvMeters) {
   const s = SKINS[look] || SKINS.medium, glove = !!s.glove;
   const m = new THREE.MeshPhysicalMaterial({
     color: glove ? s.color : 0xffffff, map: glove ? null : T.albedo,
-    roughness: glove ? 0.55 : 1, roughnessMap: glove ? null : T.orm, aoMap: T.orm, aoMapIntensity: 1,
+    roughness: glove ? 0.46 : 1, roughnessMap: glove ? null : T.orm, aoMap: T.orm, aoMapIntensity: 1,
     normalMap: glove ? T.gloveNx : T.nx,
-    specularIntensity: s.spec, sheen: glove ? 0.4 : 0.12, sheenRoughness: glove ? 0.45 : 0.7, sheenColor: glove ? 0x6a5848 : 0xc89282,
+    specularIntensity: s.spec, sheen: glove ? 0.4 : 0.12, sheenRoughness: glove ? 0.45 : 0.7, sheenColor: glove ? 0x6a5848 : s.sheen,
     clearcoat: glove ? 0.3 : 0, clearcoatRoughness: 0.42,
     emissive: glove ? 0x000000 : s.sss, emissiveIntensity: glove ? 0 : 0.02,
   });
   const detail = glove ? T.leather : T.pores;
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
-      uOrm: { value: T.orm }, uNy: { value: glove ? T.gloveNy : T.ny }, uDetail: { value: detail }, uGain: { value: new THREE.Vector3(...(s.gain || [1, 1, 1])) },
+      uOrm: { value: T.orm }, uSt: { value: T.gloveSt }, uNy: { value: glove ? T.gloveNy : T.ny }, uDetail: { value: detail }, uGain: { value: new THREE.Vector3(...(s.gain || [1, 1, 1])) },
       uDetailRep: { value: uvMeters / (glove ? MAP.tileLeather : MAP.tileSkin) },
       uDetailK: { value: glove ? 2.2 : 1.6 }, uWrap: { value: new THREE.Vector3(...s.wrap) },
     });
-    sh.fragmentShader = 'uniform sampler2D uOrm, uNy, uDetail; uniform vec3 uGain, uWrap; uniform float uDetailRep, uDetailK;\n' + sh.fragmentShader
+    sh.fragmentShader = 'uniform sampler2D uOrm, uSt, uNy, uDetail; uniform vec3 uGain, uWrap; uniform float uDetailRep, uDetailK;\n' + sh.fragmentShader
       .replace('#include <map_fragment>', `#include <map_fragment>
         vec4 ormT = texture2D( uOrm, vNormalMapUv );
         ${glove ? `diffuseColor.rgb *= 0.7 + 0.3 * ormT.r;
-        diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.2, 0.17, 0.14 ), smoothstep( 0.2, 0.8, ormT.a ) * 0.8 );`
+        diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.2, 0.17, 0.14 ), smoothstep( 0.2, 0.8, texture2D( uSt, vNormalMapUv ).r ) * 0.8 );`
         : 'diffuseColor.rgb *= mix( vec3( 1.0 ), uGain, ormT.b );'}`)
       .replace('#include <normal_fragment_maps>', THREE.ShaderChunk.normal_fragment_maps.replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', `
         vec2 g = ( vec2( texture2D( normalMap, vNormalMapUv ).r, texture2D( uNy, vNormalMapUv ).r ) * 2.0 - 1.0 ) * ${MAP.slopeMax.toFixed(2)};
@@ -400,11 +400,11 @@ export async function loadHands() {
     if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
     return t;
   });
-  const [l, r, albedo, nx, ny, orm, gloveNx, gloveNy, pores, leather] = await Promise.all([
+  const [l, r, albedo, nx, ny, orm, gloveNx, gloveNy, gloveSt, pores, leather] = await Promise.all([
     gltf.loadAsync(MODELS + 'hand_left.glb'), gltf.loadAsync(MODELS + 'hand_right.glb'),
     tex('hand_albedo.webp', true), tex('hand_nx.webp'), tex('hand_ny.webp'), tex('hand_orm.webp'),
-    tex('hand_glove_nx.webp'), tex('hand_glove_ny.webp'), tex('hand_pores.webp', false, true), tex('hand_leather.webp', false, true),
+    tex('hand_glove_nx.webp'), tex('hand_glove_ny.webp'), tex('hand_glove_st.webp'), tex('hand_pores.webp', false, true), tex('hand_leather.webp', false, true),
   ]);
-  const T = { albedo, nx, ny, orm, gloveNx, gloveNy, pores, leather };
+  const T = { albedo, nx, ny, orm, gloveNx, gloveNy, gloveSt, pores, leather };
   return { left: new Hand(l.scene, 'left', T), right: new Hand(r.scene, 'right', T) };
 }
