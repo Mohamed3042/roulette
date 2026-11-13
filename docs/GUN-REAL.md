@@ -9,23 +9,25 @@ The procedural revolver is replaced by an artist-made model: "Smith & Wesson's 6
 - The rubber wrap-around grip is re-textured as walnut instead of being tinted. It gets planar UVs, a generated checkered field inset from the panel outline (bordered, worn flat on the high points), and a raised round medallion on each side, modelled in the script. Its shape is still the source's wrap-around grip, not new slab panels.
 
 ## Looks (`STEEL_LOOKS`, `GRIP_LOOKS`, `MEDAL_LOOKS` in `js/revolver.js`)
-- **service** (default): blue-black steel with uneven grey-brown patina patches, finish worn thin next to edges, and bare bright steel on convex edges and the muzzle crown. The edge mask is baked from the model's curvature and AO. It also has handling scratches, grime in recesses and a little scanned scuffing. Low oil sheen, not glossy. Hammer and trigger are case-coloured. Grips are dark red-brown checkered walnut with a worn nickel medallion.
-- **stainless**: the source's brushed stainless (its roughness and albedo detail mostly shown through), black stippled grip.
-- **nickel**: bright nickel, ivory grip with light checkering, brass-coloured medallion.
+- **service** (default): blue-black steel. Patina is cloudy, direction-free 3D value noise in gun space (grey worn clouds, fine speckle, a few small rust freckles), with a few fine handling scratches on top; no tile is stretched along the barrel. Edges are only worn thin (a slightly lighter grey), broken along their length by low-frequency noise, so no edge reads as a line. Bare mid-grey steel (`worn` 0x69686b, rough 0.48) appears only where a carried gun wears: the muzzle crown and the front of the barrel and underlug, the cylinder's front edge, the front sight, the top-strap corners, the bottom of the trigger guard and the hammer spur. Those places are masks on a per-vertex rest position in gun space (`aRoot`, built at load), so they stay put when parts move. Low oil sheen. Hammer and trigger are case-coloured. Satin oiled walnut grip (soft broad highlight, visible grain, checkering worn smoother on its high points) with a worn nickel medallion.
+- **stainless**: cool neutral brushed stainless, black rubber grip (weak, cool sheen).
+- **nickel**: bright warm-white nickel, the brightest of the three; ivory grip, brass-coloured medallion.
+- The rooms are warm, so each look carries a reflection gain and tint (`env`) applied in the shader; `scene.environmentIntensity` overrides `envMapIntensity` in this three.js build. Direct lamp highlights on steel are damped at grazing angles and capped (`specMax`), so curved edges such as the trigger guard never bloom into a glowing ring.
+- Open cylinder: the cylinder has its own steel material instance. On its rear face the scanned maps are blurry, so the shader draws the extractor star (arcs round each chamber, a crisp anti-aliased groove), the machined hub and the matte face; the ratchet and centre pin are the model's own geometry. Primers are satin nickel; the `.44 MAG / 240 GR` headstamps and the fired-primer dent are unchanged.
 
 ## Maps (all from the script; 2048 px max, WebP)
 | file | content | bytes |
 |---|---|---|
-| revolver.glb | Draco mesh, 21,522 tris (gun 9,138 + 6 x (cartridge 1,424 + primer 640)) | 78,248 |
+| revolver.glb | Draco mesh, 21,522 tris (gun 9,138 + 6 x (cartridge 1,424 + primer 640)); grip with smooth normals | 77,688 |
 | revolver_wear.webp | baked AO / cavity / convex edge on the source UVs | 309,588 |
 | revolver_normal.webp | source normal map (OpenGL), marks flattened | 185,168 |
 | revolver_detail.webp | R source roughness, G source metalness, B source albedo luminance | 214,696 |
 | revolver_grip_m.webp | wood grain / checkered field / figure | 98,502 |
 | revolver_grip_n.webp | checkering normal map | 110,772 |
-| revolver_scratch.webp | unchanged procedural scratch tile | 242,090 |
-| **total** | | **1,239,064** (old revolver set 1,137,490) |
+| revolver_scratch.webp | procedural scratch tile (handling scratches; the patina no longer uses it) | 242,090 |
+| **total** | | **1,238,504** (old revolver set 1,137,490) |
 
-`revolver_normal.webp` and `revolver_detail.webp` are new names: `sw.js` precaches them and `CACHE` is `roulette-v5`. Precache: 5,474,971 bytes on main (5dfabb2), 5,579,347 bytes here.
+`revolver_normal.webp` and `revolver_detail.webp` are new names: `sw.js` precaches them and `CACHE` is `roulette-v5`. Precache (sum of the `SHELL` files, `./` counted as index.html): 5,591,171 bytes here, 5,585,579 at 32055a5.
 
 ## Fit (`FIT` in `js/revolver.js`)
 The model's frame (origin = trigger pivot) is placed so the trigger pivot sits where the old one did: 13 mm above and 3 mm behind the trigger-finger origin, with no rotation or scale. The model is kept at its real size. Hand, trigger finger and grip stay in place; `hands.js` and `main.js` are untouched. What moved, because the real gun is bigger:
@@ -37,14 +39,15 @@ The model's frame (origin = trigger pivot) is placed so the trigger pivot sits w
 - The grip is longer than the old one and reaches below the little finger at the hip.
 
 ## Verified
-- Preview stills (1600x1000): `docs/shots/v3-gun/service-{side,q34,open,sights,grip,rear}.jpg`, `stainless-{side,q34}.jpg`, `nickel-{side,q34}.jpg`.
-- In-app, on the merge with origin/main 5dfabb2:
-  - Phone 390x844 with touch, Chromium and WebKit: `phone-{chromium,webkit}-{hip,ads,open,fire,custom}.jpg`.
+- Preview stills (1600x1000): `docs/shots/v3-gun/service-{side,q34,open,sights,grip,rear}.jpg`, `stainless-{side,q34}.jpg`, `nickel-{side,q34}.jpg`, checked at full size and in crops against the two reference photos (worn blued revolver with walnut grip; open cylinder macro).
+- In-app (`index.html?nosw&debug`, the governor held off with `dbg.noGovernor` so Windows WebKit keeps its canvas in screenshots):
+  - Phone 390x844 with touch, DPR 3, Chromium and WebKit: `phone-{chromium,webkit}-{hip,ads,open,fire,custom}.jpg`.
   - Desktop 1440x900 Chromium: `desk-chromium-{hip,ads,open}.jpg`.
   - Range mode loads and fires: `phone-chromium-range-fire.jpg`.
   - 0 console errors and 0 failed requests in every run.
-- Spin, swing-out, hammer, trigger, fired primer dent, twirl, inspect, hold and fan all run, captured as freeze-frame checks. Customize tiles `assets/ui/gun-*.webp` were re-rendered from the new model at 480x300.
-- Frame time, phone-size Chromium: 16.7 ms median (vsync) on both main and this branch. A synced render (composer.render + readPixels, 60 frames, 780x1688) took 2.2-2.8 ms median here vs 2.1-3.3 ms on main. Windows WebKit, which renders in software: 47-54 ms.
+  - The sight picture lines up at ADS (front sight in the rear notch on the bull), and the six choice labels point at the six chambers in the open view.
+- Customize tiles `assets/ui/gun-*.webp` (480x300) re-rendered from the new looks.
+- Not re-measured after the look pass: frame time. The shader adds 3D value noise (8 octave lookups) per steel pixel and the star block on the cylinder face only.
 
 ## Hunks outside the revolver files
 - `sw.js`: `CACHE` is `roulette-v5`, and the precache list gains `revolver_normal.webp` and `revolver_detail.webp`.
@@ -53,7 +56,7 @@ The model's frame (origin = trigger pivot) is placed so the trigger pivot sits w
 ## Not matching the reference photos yet / not verified
 - The reference revolvers have a 4 in barrel and a slimmer older frame. This model is a large frame with a 6.5 in barrel and a full underlug, which is fixed by the model.
 - The grip keeps the wrap-around target-stock shape: wood covers the backstrap. The references have two slab panels with the steel backstrap showing.
-- The patina is texture-driven: there is no pitting or rust and no real micro-relief. The headstamp is a flat texture, not stamped geometry.
+- The patina is colour and roughness only: no pitting or micro-relief in the normals. The extractor star is drawn in the shader, not modelled. The headstamp is a flat texture, not stamped geometry.
 - Not checked on a real iPhone or Android phone (frame rate, look under a phone GPU).
 
 ## Rebuild

@@ -83,7 +83,7 @@ const STEEL_LOOKS = {
   },
 };
 const GRIP_LOOKS = {
-  service: { dark: lin(0x140904), light: lin(0x2c170b), hi: lin(0x4a2e1a), grain: 0.7, rough: 0.46, roughChk: 0.7, cc: 0.32, ccR: 0.3, normal: 'checker', nScale: 1.0 },
+  service: { dark: lin(0x140904), light: lin(0x2c170b), hi: lin(0x55331b), grain: 0.85, rough: 0.46, roughChk: 0.7, cc: 0.32, ccR: 0.3, normal: 'checker', nScale: 1.0 },
   stainless: { dark: lin(0x060606), light: lin(0x0a0a0a), hi: lin(0x0d0d0d), grain: 0.0, rough: 0.86, roughChk: 0.86, cc: 0.0, ccR: 0.6, normal: 'stipple', nScale: 0.7, spec: 0.22, specC: 0xb4c0d0 },
   nickel: { dark: lin(0xcdbf9f), light: lin(0xece5d3), hi: lin(0xf4efe3), grain: 0.25, rough: 0.3, roughChk: 0.42, cc: 0.45, ccR: 0.25, normal: 'checker', nScale: 0.6 },
 };
