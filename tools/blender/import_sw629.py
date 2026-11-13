@@ -240,7 +240,7 @@ def empty(name, loc, parent=None):
     if parent: e.parent = parent
     return e
 
-def part_object(name, ids, mat):
+def part_object(name, ids, mat, angle=32):
     b = bmesh.new(); b.from_mesh(SME); b.verts.ensure_lookup_table()
     bmesh.ops.delete(b, geom=[v for v in b.verts if v.index not in ids], context='VERTS')
     bmesh.ops.transform(b, matrix=TM, verts=b.verts)
@@ -248,7 +248,7 @@ def part_object(name, ids, mat):
     me = bpy.data.meshes.new(name); b.to_mesh(me); b.free()
     me.materials.clear(); me.materials.append(mat)
     ob = link(bpy.data.objects.new(name, me))
-    shade(ob, 32)
+    shade(ob, angle)
     return ob
 
 def apply_mods(ob):
@@ -463,7 +463,7 @@ def build_medallions(grip, my, mz, r):
 def assemble():
     root = empty('Revolver', (0, 0, 0))
     frame = part_object('Frame', node_verts['Frame'], M_STEEL); frame.parent = root
-    grip = part_object('Grip', node_verts['Grip'], M_GRIP)
+    grip = part_object('Grip', node_verts['Grip'], M_GRIP, 180)   # wood is all rounded: smooth normals, no faceted ridges
     y0, z0 = grip_uv(grip)
     my, mz, mr = make_grip_tex(grip, y0, z0)
     meds = build_medallions(grip, my, mz, mr)
