@@ -724,10 +724,10 @@ export function createRange(ctx) {
   const GRIP = { thumb: [0.7, -0.25, -0.4, 0.05], index: [-0.25, 0.85, 0.45, -0.2], middle: [0.55, 1.3, 1.35, 0], ring: [0.42, 1.15, 0.85, 0], pinky: [0.1, 0.8, 1.1, 0], cup: 0.3 };
   const THUMB_PRESS = [0.35, 0.35, 0.3, 0.2];
   // Support hand (left) in gun space, when aiming: palm on the left grip panel, fingers over the shooting hand's.
-  const SUP = { pos: V(-0.004, -0.03, 0.05), finger: V(0.2, -0.5, -0.84), palm: V(0.95, 0.25, 0.1), elbow: V(-0.7, -0.7, -0.35) };
+  const SUP = { pos: V(-0.004, -0.03, 0.05), finger: V(0.302, 0.302, -0.905), palm: V(0.95, 0.25, 0.1), elbow: V(-0.22, -1, 0.3), len: 0.27 };
   const SUP_POSE = { thumb: [0.35, 0.25, 0.1, 0.05], index: [0.8, 1.15, 0.6, 0.05], middle: [0.85, 1.2, 0.65, 0], ring: [0.9, 1.2, 0.65, 0], pinky: [0.95, 1.15, 0.6, -0.05], cup: 0.4 };
   // Magazine hand: palm under the base plate, index finger along the front of the magazine.
-  const MAGH = { off: V(0, -0.098, 0.036), finger: V(0.1, 0.15, -1), palm: V(0, 1, 0.1), elbow: V(-0.12, -0.35, 0.3) };
+  const MAGH = { off: V(0, -0.098, 0.036), finger: V(0.1, 0.15, -1), palm: V(0, 1, 0.1), elbow: V(-0.12, -0.35, 0.3), len: 0.72 };
   const MAG_POSE = { thumb: [0.3, 0.3, 0.1, 0.1], index: [0.9, 0.5, 0.2, 0.05], middle: [1.1, 1.0, 0.6, 0], ring: [1.15, 1.0, 0.6, 0], pinky: [1.2, 1.0, 0.6, 0], cup: 0.4 };
   const FORE_ADS = V(-0.1, -1.2, 0);   // right forearm direction change when aiming (camera space)
   const REST_L = { pos: V(-0.2, SHELF_Y + 0.024, -0.6), elbow: V(-0.27, SHELF_Y + 0.03, -0.2) };
@@ -805,8 +805,8 @@ export function createRange(ctx) {
     const lp = left.group.position.copy(REST_L.pos);
     left.group.quaternion.copy(ctx.LQ());
     const pose = ctx.lerpPose(ctx.REST, ctx.REST, 0, handTmp.pose);
-    const elbow = V().copy(REST_L.elbow);
-    const blend = (w, posRoot, finger, palm, handPose, elbowCam) => {
+    const elbow = V().copy(REST_L.elbow); let lenL = 0.72;
+    const blend = (w, posRoot, finger, palm, handPose, elbowCam, len) => {
       if (w < 0.001) return;
       const s = w * w * (3 - 2 * w);
       const pw = gun.root.localToWorld(posRoot.clone());
@@ -818,15 +818,15 @@ export function createRange(ctx) {
       left.group.quaternion.slerp(handTmp.o.quaternion, s);
       ctx.lerpPose(pose, handPose, s, pose);
       const ew = pw.clone().add(V(elbowCam.x * mx, elbowCam.y, elbowCam.z).applyQuaternion(cq)).applyMatrix4(inv);
-      elbow.lerp(ew, s);
+      elbow.lerp(ew, s); lenL += (len - lenL) * s;
     };
-    blend(P.ads * (1 - RL.lh), SUP.pos, SUP.finger, SUP.palm, SUP_POSE, SUP.elbow);
-    if (RL.lh > 0.001) blend(RL.lh, magPos(RL.np, V()).add(MAGH.off), MAGH.finger, MAGH.palm, MAG_POSE, MAGH.elbow);
+    blend(P.ads * (1 - RL.lh), SUP.pos, SUP.finger, SUP.palm, SUP_POSE, SUP.elbow, SUP.len);
+    if (RL.lh > 0.001) blend(RL.lh, magPos(RL.np, V()).add(MAGH.off), MAGH.finger, MAGH.palm, MAG_POSE, MAGH.elbow, MAGH.len);
     left.apply(pose);
     scene.updateMatrixWorld();
     const fore = V(0, 0, 1).transformDirection(right.wrist.matrixWorld).add(V().copy(ctx.ELBOW_R).addScaledVector(FORE_ADS, P.ads).multiply(V(mx, 1, 1)).applyQuaternion(cq)).normalize();
     right.aimSleeve(right.wrist.getWorldPosition(V()).addScaledVector(fore, 0.3));
-    left.aimSleeve(lmir.localToWorld(elbow.clone()));
+    left.aimSleeve(lmir.localToWorld(elbow.clone()), lenL);
   }
 
   return {
@@ -834,7 +834,7 @@ export function createRange(ctx) {
     HIP: { land: { x: 0.125, y: -0.1, z: -0.4 }, port: { x: 0.052, y: -0.115, z: -0.48 }, rz: -0.1, D: 9 },
     ADS_EYE: { land: 0.55, port: 0.58 },
     LOOK: { pitch: -0.035, limY: 0.42, limP: 0.24 },
-    SLEEVE: { sleeve: '#3a3b34', cuff: '#2a2a27', watch: false, buttons: false },
+    SLEEVE: { sleeve: '#3a3b34', cuff: '#2a2a27', watch: false, buttons: false, lift: 0.5 },
     GRADE: { vignette: 0.46, grain: 0.045, tint: [1.03, 1.0, 0.95] },
     get env() { return env; },
     get newMag() { return newMag; },

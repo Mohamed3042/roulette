@@ -1,6 +1,6 @@
 // Offline cache: the shell and phone assets are stored on install; everything else same-origin is cached on first use.
 // Responses come from the cache at once and refresh in the background, so a new push shows on the next open.
-const CACHE = 'roulette-v6';
+const CACHE = 'roulette-v7';
 const SHELL = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',
   'js/main.js', 'js/revolver.js', 'js/hands.js', 'js/fx.js', 'js/sound.js', 'js/target.js', 'js/customize.js',
