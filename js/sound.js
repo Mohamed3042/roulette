@@ -271,13 +271,15 @@ export class Sound {
     if (this.ready) this._noise(this._ctx.currentTime, 0.032, 0.38, 4800, { q: 1.2 });
   }
 
-  shot() {
+  // A bass-free crack: a hard broadband transient, a short mid-range body, then the room's tail. No sub boom.
+  shot({ ring = true, pitch = 1 } = {}) {
     if (!this.ready) return;
     const t = this._ctx.currentTime;
     const wet = this._rooms[this._room].reverb;
-    this._noise(t, 0.006, 1.05, 14000, { type: 'lowpass', attack: 0.0002, wet });
-    this._noise(t + 0.003, 0.17, 0.65, 8000, { type: 'lowpass', end: 600, wet });
-    this._tone(t + 0.004, 0.25, 0.42, 110, 38, { saturate: true, wet });
+    this._noise(t, 0.005, 1.1, 12000 * pitch, { type: 'highpass', attack: 0.0002, wet });
+    this._noise(t + 0.001, 0.045, 0.85, 2600 * pitch, { q: 0.8, end: 1400, attack: 0.0004, wet });
+    this._noise(t + 0.004, 0.16, 0.4, 5200 * pitch, { type: 'lowpass', end: 900, wet });
+    if (!ring) return;
     this._hold(this._ambience.gain, t);
     this._ambience.gain.linearRampToValueAtTime(0.025, t + 0.012);
     this._ambience.gain.setTargetAtTime(1, t + 0.16, 0.85);

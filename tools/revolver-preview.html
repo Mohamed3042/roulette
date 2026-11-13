@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revolver preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0907; overflow: hidden; }
+  canvas { display: block; }
+  #out { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #gl { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #hud { position: absolute; left: 12px; bottom: 10px; font: 12px/1.4 system-ui, sans-serif; color: #d9cbb4; opacity: .7; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="out"></canvas>
+<div id="hud"></div>
+<script type="importmap">{ "imports": { "three": "../vendor/three/three.module.js", "three/addons/": "../vendor/three/addons/" } }</script>
+<script type="module">
+// Preview of js/revolver.js lit like the app's study room.
+// Query: look=service|stainless|nickel  cam=q34|open|sights|grip|side|rear|front|top  open=0..1  fired=0,3  cock=0..1  pull=0..1
+//        spin=<chambers>  dof=<samples>  fstop=<n>  hud=0
+import * as THREE from 'three';
+import { createRevolver, OPEN_ANGLE, STEP, HAMMER_COCK, TRIGGER_PULL } from '../js/revolver.js';
+
+const q = new URLSearchParams(location.search);
+const look = q.get('look') || 'service', camName = q.get('cam') || 'q34';
+const dofN = +(q.get('dof') || 0), fstop = +(q.get('fstop') || 2.8);
+
+const glc = document.getElementById('gl'), out = document.getElementById('out');
+const renderer = new THREE.WebGLRenderer({ canvas: glc, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 1, 0.005, 40);
+
+// ---- room: plate as the backdrop + an environment built from it, with warm lamp panels
+const plateImg = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = '../assets/plates/study-2k.jpg'; });
+function equirect(img) {
+  const W = 1024, H = 512, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const g = cv.getContext('2d'), qd = W / 4, y0 = H * 0.24, h = H * 0.56;
+  const draw = (cx, flip, a) => { g.save(); g.globalAlpha = a; g.translate(cx, 0); g.scale(flip ? -1 : 1, 1); g.drawImage(img, -qd * 0.75, y0, qd * 1.5, h); g.restore(); };
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H); g.filter = 'saturate(' + (q.get('sat') || 0.25) + ')';
+  draw(W * 0.75, true, 0.75); draw(0, true, 0.6); draw(W, true, 0.6); draw(W * 0.5, false, 0.6); draw(W * 0.25, false, 1);
+  g.drawImage(cv, 0, y0, W, 2, 0, 0, W, y0); g.fillStyle = 'rgba(0,0,0,.55)'; g.fillRect(0, 0, W, y0);
+  g.drawImage(cv, 0, y0 + h - 2, W, 2, 0, y0 + h, W, H - y0 - h);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const envScene = new THREE.Scene();
+const eqTex = equirect(plateImg);
+envScene.add(new THREE.Mesh(new THREE.SphereGeometry(10, 64, 32), new THREE.MeshBasicMaterial({ map: eqTex, side: THREE.BackSide })));
+const lamp = (pos, w, h, k, col = 0xffd9ae) => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(col).multiplyScalar(k), side: THREE.DoubleSide }));
+  m.position.set(...pos); m.lookAt(0, 0, 0); envScene.add(m);
+};
+lamp([-6, 2.6, -5.5], 1.8, 1.8, 12);           // the brass desk lamp, front left
+lamp([-7, 5.5, 1.5], 3.0, 1.2, 6);             // ceiling light, left
+lamp([0, 9, 0], 6, 6, 1.6, 0xfff0dc);          // soft overhead bounce
+lamp([-2, 4, 7], 5, 2.5, 3.2, 0xe4ebf5);       // neutral window behind the viewer (gives metal a white sheen)
+lamp([6, 3.5, 6], 2.0, 2.0, 4, 0xffc58a);      // warm bounce behind right
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(envScene, 0, 0.1, 50).texture;
+scene.environmentIntensity = +(q.get('env') || 1.9);
+// blurred backdrop (focus is on the gun)
+const bg = document.createElement('canvas'); bg.width = 1280; bg.height = 853;
+{ const g = bg.getContext('2d'); g.filter = 'blur(10px)'; g.drawImage(plateImg, -40, -30, 1360, 913); g.filter = 'none'; g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(0, 0, 1280, 853); }
+const bgTex = new THREE.CanvasTexture(bg); bgTex.colorSpace = THREE.SRGBColorSpace; scene.background = bgTex;
+
+// ---- lights (app: warm key spot from the upper left, dim warm rim from behind right, soft front fill, hemi)
+const key = new THREE.SpotLight(0xffd6ac, 3.4 * 1.6, 0, 0.5, 0.9, 0);
+key.position.set(-0.75, 0.75, 0.35); key.castShadow = true; key.shadow.mapSize.setScalar(2048); key.shadow.bias = -0.00015; key.shadow.normalBias = 0.002;
+key.shadow.camera.near = 0.3; key.shadow.camera.far = 2.5; key.shadow.radius = 3;
+scene.add(key, key.target);
+const rim = new THREE.DirectionalLight(0xffe2c2, 0.9); rim.position.set(0.8, 0.5, -1.8); scene.add(rim);
+const front = new THREE.DirectionalLight(0xf2efe9, 0.7); front.position.set(0.4, 0.7, 1.2); scene.add(front);
+scene.add(new THREE.HemisphereLight(0x7a7f88, 0x2a1c12, 0.4));
+
+// ---- gun
+const gun = createRevolver({ look });
+scene.add(gun.root);
+await gun.ready;
+const openK = +(q.get('open') || (camName === 'open' ? 1 : 0));
+gun.crane.rotation.z = OPEN_ANGLE * openK;
+gun.cylinder.rotation.z = STEP * +(q.get('spin') || 0);
+gun.hammer.rotation.x = HAMMER_COCK * +(q.get('cock') || 0);
+gun.trigger.rotation.x = TRIGGER_PULL * +(q.get('pull') || 0);
+for (const i of (q.get('fired') ?? (camName === 'open' ? '0' : '')).split(',').filter(Boolean)) gun.setFired(+i, true);
+for (const i of (q.get('empty') || '').split(',').filter(Boolean)) gun.setLoaded(+i, false);
+gun.root.updateMatrixWorld(true);
+
+// ---- cameras (gun space: +X right, +Y up, -Z muzzle; origin = trigger finger)
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const cyl = gun.cylinder.getWorldPosition(V(0, 0, 0));
+const rs = gun.rearSight.getWorldPosition(V(0, 0, 0)), fs = gun.frontSight.getWorldPosition(V(0, 0, 0));
+const CAMS = {
+  q34: { pos: V(-0.36, 0.2, 0.2), at: V(0, 0.012, -0.035), fov: 30 },
+  side: { pos: V(-0.62, 0.0, -0.035), at: V(0, -0.002, -0.035), fov: 24 },
+  rear: { pos: V(-0.12, 0.13, 0.32), at: V(0, 0.03, -0.02), fov: 26 },
+  front: { pos: V(0.1, 0.09, -0.5), at: V(0, 0.03, -0.04), fov: 24 },
+  top: { pos: V(0.0, 0.6, -0.04), at: V(0, 0, -0.04), fov: 26, up: V(0, 0, -1) },
+  open: { pos: cyl.clone().add(V(-0.03, 0.022, 0.1)), at: cyl.clone().add(V(0.0, 0.0, 0.0)), fov: 30 },
+  sights: { pos: rs.clone().add(V(0, 0, 0.3)), at: fs, fov: 30 },
+  grip: { pos: V(-0.2, 0.03, 0.12), at: V(0, -0.012, 0.05), fov: 26 },
+};
+const C = CAMS[camName] || CAMS.q34;
+camera.fov = +(q.get('fov') || C.fov); camera.position.copy(C.pos); if (C.up) camera.up.copy(C.up); camera.lookAt(C.at);
+key.target.position.copy(C.at.clone().setY(C.at.y - 0.02));
+
+function size() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  out.width = w * devicePixelRatio; out.height = h * devicePixelRatio;
+}
+size();
+
+// ---- render: one frame, or a thin-lens accumulation for depth of field
+const ctx = out.getContext('2d');
+const focus = C.at.distanceTo(camera.position);
+if (dofN > 1) {
+  const fl = 0.5 * 0.036 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * (camera.aspect < 1 ? 1 : 1);
+  const apert = fl / fstop / 2;   // aperture radius in metres (36 mm-equivalent lens)
+  const base = camera.position.clone(), right = V(1, 0, 0).applyQuaternion(camera.quaternion), up = V(0, 1, 0).applyQuaternion(camera.quaternion);
+  const fwd = V(0, 0, -1).applyQuaternion(camera.quaternion), fp = base.clone().addScaledVector(fwd, focus);
+  for (let i = 0; i < dofN; i++) {
+    const a = i * 2.39996, r = Math.sqrt((i + 0.5) / dofN) * apert;
+    camera.position.copy(base).addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r);
+    camera.up.copy(up); camera.lookAt(fp);
+    renderer.render(scene, camera);
+    ctx.globalAlpha = 1 / (i + 1); ctx.drawImage(glc, 0, 0, out.width, out.height);
+  }
+} else {
+  renderer.render(scene, camera);
+  ctx.drawImage(glc, 0, 0, out.width, out.height);
+}
+glc.style.visibility = 'hidden';
+if (q.get('hud') !== '0') document.getElementById('hud').textContent = `${look} · ${camName} · ${renderer.info.render.triangles} tris`;
+window.__ready = true;
+</script>
+</body>
+</html>

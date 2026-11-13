@@ -10,9 +10,9 @@ const LONG = ['metacarpal', 'phalanx-proximal', 'phalanx-intermediate', 'phalanx
 const THUMB = ['metacarpal', 'phalanx-proximal', 'phalanx-distal', 'tip'];
 
 export const SKINS = {
-  light: { color: 0xe6c3ae, sheen: 0xd9a596 },
-  medium: { color: 0xb88a6e, sheen: 0xb98674 },
-  deep: { color: 0x6a4836, sheen: 0x8d6655 },
+  light: { color: 0xe3c0aa, sheen: 0xe0a294, sss: 0xc0402a },
+  medium: { color: 0xb38569, sheen: 0xc08a78, sss: 0xa0331e },
+  deep: { color: 0x684634, sheen: 0x9a6b58, sss: 0x6a1e10 },
   gloves: { color: 0x15110f, sheen: 0x6e5d4e, glove: true },
 };
 
@@ -94,8 +94,44 @@ class Hand {
     };
     for (const [k, p] of Object.entries(FINGERS)) build(k, p, LONG);
     build('thumb', 'thumb', THUMB);
+    this.paintNails();
     this.pose = { thumb: [0, 0, 0, 0], index: [0, 0, 0, 0], middle: [0, 0, 0, 0], ring: [0, 0, 0, 0], pinky: [0, 0, 0, 0], cup: 0 };
     this._q = new THREE.Quaternion(); this._e = new THREE.Euler(); this._v = new THREE.Vector3();
+  }
+
+  // Nails: the bind-pose mesh has none painted, so the backs of the distal phalanges read as skin. Mark the nail plate
+  // in the vertex colours (paler, pinker, a white free edge) from the joint frames: +Y of a joint is the back of the finger.
+  paintNails() {
+    const g = this.mesh.geometry, pos = g.attributes.position, nrm = g.attributes.normal;
+    if (!g.attributes.color) {
+      const c = new Float32Array(pos.count * 3).fill(1); g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+    }
+    const col = g.attributes.color, v = new THREE.Vector3(), n = new THREE.Vector3(), seg = new THREE.Vector3(), rel = new THREE.Vector3();
+    this.nailMask = new Float32Array(pos.count);
+    for (const [key, ch] of Object.entries(this.chains)) {
+      const k = ch.bones.length, a = ch.P[k - 2], b = ch.P[k - 1], Q = ch.Q[k - 2];
+      const dorsal = new THREE.Vector3(0, 1, 0).applyQuaternion(Q);
+      seg.copy(b).sub(a); const L = seg.length(); seg.normalize();
+      const w = key === 'thumb' ? 0.0068 : key === 'pinky' ? 0.0048 : 0.0056;
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i); rel.copy(v).sub(a);
+        const t = rel.dot(seg) / L; if (t < 0.38 || t > 1.25) continue;
+        rel.addScaledVector(seg, -rel.dot(seg));
+        const up = rel.dot(dorsal), side = Math.sqrt(Math.max(0, rel.lengthSq() - up * up));
+        n.fromBufferAttribute(nrm, i);
+        if (up <= 0 || side > w || n.dot(dorsal) < 0.35) continue;
+        const edge = Math.min(1, (w - side) / 0.0012) * Math.min(1, (t - 0.38) / 0.08);
+        this.nailMask[i] = Math.max(this.nailMask[i], edge * (t > 1.0 ? 2 : 1));
+      }
+    }
+    for (let i = 0; i < pos.count; i++) {
+      const m = Math.min(1, this.nailMask[i]); if (!m) continue;
+      const free = this.nailMask[i] > 1 ? 1 : 0;
+      const r = col.getX(i), gg = col.getY(i), bb = col.getZ(i);
+      const tr = free ? 1.5 : 1.3, tg = free ? 1.45 : 1.14, tb = free ? 1.42 : 1.12;
+      col.setXYZ(i, r + (Math.min(1, r * tr) - r) * m, gg + (Math.min(1, gg * tg) - gg) * m, bb + (Math.min(1, bb * tb) - bb) * m);
+    }
+    col.needsUpdate = true;
   }
 
   // pose: finger = [mcp, pip, dip, spread]; thumb = [cmcFlex, cmcSpread, mcp, ip]; cup = palm arch.
@@ -131,6 +167,9 @@ class Hand {
     const cuffMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.0375, 0.034, 0.06, 64, 1, true).translate(0, 0.02, 0), new THREE.MeshPhysicalMaterial({ color: cuff, roughness: 0.75, sheen: 0.6, sheenColor: 0xffffff, side: THREE.DoubleSide }));
     sleeveMesh.position.y = 0.035; this.sleeveMesh = sleeveMesh;
     for (const m of [sleeveMesh, cuffMesh]) { m.castShadow = m.receiveShadow = true; this.sleeve.add(m); }
+    // A skin disc just inside the cuff closes the hand mesh's open wrist, which shows when looking down the sights.
+    const cap = new THREE.Mesh(new THREE.CircleGeometry(0.036, 48).rotateX(-Math.PI / 2).translate(0, 0.004, 0), this.mesh.material);
+    this.sleeve.add(cap); this.cap = cap;
     const d = new THREE.Group(), w = this.wrist.position;
     const dorsal = new THREE.Vector3(1, 0, 0).applyQuaternion(this.wrist.quaternion);
     const along = new THREE.Vector3(0, 0, 1).applyQuaternion(this.wrist.quaternion); // toward the elbow
@@ -153,16 +192,19 @@ class Hand {
     const w = this.wrist.getWorldPosition(this._v);
     // Start a little up the forearm from the wrist joint so the cuff hides the mesh edge.
     const dir = elbow.clone().sub(w), len = dir.length(); dir.normalize();
-    this.sleeve.position.copy(w).addScaledVector(dir, 0.012);
+    this.sleeve.position.copy(w).addScaledVector(dir, -0.006);
     this.sleeve.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
     this.sleeveMesh.scale.y = len + 0.25;
+    if (this.cap.material !== this.mesh.material) this.cap.material = this.mesh.material;
   }
 
   setSkin(name) {
     const s = SKINS[name] || SKINS.light;
     const m = new THREE.MeshPhysicalMaterial({
-      color: s.color, vertexColors: !!this.mesh.geometry.attributes.color, roughness: s.glove ? 0.42 : 0.6, sheen: s.glove ? 0.35 : 0.3, sheenRoughness: 0.6, sheenColor: s.sheen,
-      clearcoat: s.glove ? 0.45 : 0.06, clearcoatRoughness: s.glove ? 0.35 : 0.5,
+      color: s.color, vertexColors: !!this.mesh.geometry.attributes.color, roughness: s.glove ? 0.42 : 0.52, sheen: s.glove ? 0.35 : 0.55, sheenRoughness: 0.45, sheenColor: s.sheen,
+      clearcoat: s.glove ? 0.45 : 0.08, clearcoatRoughness: s.glove ? 0.35 : 0.42, specularIntensity: s.glove ? 1 : 0.55,
+      // A touch of warm self-light stands in for light scattered under the skin, so the shadow side is never grey clay.
+      emissive: s.glove ? 0x000000 : s.sss, emissiveIntensity: s.glove ? 0 : 0.11,
       normalMap: Hand.grain || (Hand.grain = grainNormal()), normalScale: new THREE.Vector2(s.glove ? 0.35 : 0.12, s.glove ? 0.35 : 0.12),
     });
     if (this.mesh.material) this.mesh.material.dispose();
