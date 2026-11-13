@@ -124,6 +124,72 @@ for side, b in read_sources().items():
     HANDS[side] = H
     log(side, 'verts', len(H['pos']), 'tris', len(H['idx']))
 
+# ================================================================= FINGERTIPS (bind shape only)
+# The base mesh ends each finger in a blunt, squared cap. Taper the last ~11 mm of every distal segment toward a
+# rounded tip by moving bind-pose vertices only: weights, joints, inverse bind matrices and the rest pose are untouched,
+# so every pose keeps working. The nail side (dorsal) is narrowed less than the pad and the sides, and the cap is
+# pushed out a little so it ends in a curve, not a flat face.
+def shape_tips(H):
+    J, R, P = H['J'], H['R'], H['pos']
+    names = [n['name'] for n in H['j']['nodes']]
+    sk = H['j']['skins'][0]['joints']
+    H['tipz'] = {}
+    moved = np.zeros(len(P))
+    for f in ['thumb'] + FING:
+        segs = THUMB if f == 'thumb' else LONG
+        a = J[f'{f}-{segs[-2]}']; b = J[f'{f}-tip']; L = np.linalg.norm(b - a); e = (b - a) / L
+        dors = R[f'{f}-{segs[-2]}'][:, 1]; dors = dors - e * (dors @ e); dors /= np.linalg.norm(dors); lat = np.cross(e, dors)
+        jd = [sk.index(names.index(f'{f}-{s}')) for s in (segs[-2], 'tip') if f'{f}-{s}' in names and names.index(f'{f}-{s}') in sk]
+        w = sum((H['joints'] == j) * H['weights'] for j in jd).sum(1)
+        rel = P - a; z = rel @ e; rv = rel - np.outer(z, e)
+        cu = rv @ dors; cs = rv @ lat
+        m = (w > 0.5) & (z > 0.4 * L) & (np.linalg.norm(rv, axis=1) < 0.016)
+        zend = z[m].max()
+        # cross-section centre near the end (the axis sits toward the nail side of the finger)
+        band = m & (z > zend - 0.012) & (z < zend - 0.008)
+        c_u = 0.5 * (cu[band].max() + cu[band].min()); c_s = 0.5 * (cs[band].max() + cs[band].min())
+        k = smooth(zend - 0.011, zend, z) * np.clip(w, 0, 1) * m
+        sc_side = 1 - 0.20 * k ** 1.5; sc_pad = 1 - 0.16 * k ** 1.5; sc_up = 1 - 0.08 * k ** 1.5
+        du = cu - c_u; ds = cs - c_s
+        du = np.where(du > 0, du * sc_up, du * sc_pad); ds = ds * sc_side
+        # round the end: the last CAP mm become half an ellipsoid. Each vertex there is moved along the ray from the
+        # cap centre onto the ellipsoid whose cross-section at the cap start is the finger's own (per direction)
+        CAP, EXT = 0.0065, 0.0012
+        zs = zend - CAP; Lc = CAP + EXT
+        phi = np.arctan2(ds, du); rad = np.hypot(du, ds)
+        ring = m & (z > zs - 0.0015) & (z < zs + 0.0005)
+        nb = 24; bins = ((phi + np.pi) / (2 * np.pi) * nb).astype(int) % nb
+        Rb = np.array([rad[ring & (bins == i)].max() if (ring & (bins == i)).any() else np.nan for i in range(nb)])
+        Rb = np.where(np.isnan(Rb), np.nanmedian(Rb), Rb)
+        Rb = (np.roll(Rb, 1) + 2 * Rb + np.roll(Rb, -1)) / 4                       # smooth around the ring
+        fb = (phi + np.pi) / (2 * np.pi) * nb - 0.5; i0 = np.floor(fb).astype(int); tt = fb - i0
+        Rphi = Rb[i0 % nb] * (1 - tt) + Rb[(i0 + 1) % nb] * tt
+        sz = (z - zs) / Lc; sr = rad / Rphi
+        nrm_ = np.sqrt(sz * sz + sr * sr) + 1e-9
+        incap = m & (z > zs)
+        wcap = smooth(0.0, 0.25, sz) * np.clip(w, 0, 1)                             # blend in over the first quarter
+        zc = zs + (sz / nrm_) * Lc; rc = (sr / nrm_) * Rphi
+        z2 = np.where(incap, z + (zc - z) * wcap, z); r2 = np.where(incap, rad + (rc - rad) * wcap, rad)
+        sc = r2 / (rad + 1e-12); du = du * sc; ds = ds * sc
+        Pn = a + np.outer(z2, e) + np.outer(c_u + du, dors) + np.outer(c_s + ds, lat)
+        sel = (k > 1e-4) | incap
+        P[sel] = Pn[sel]; moved = np.maximum(moved, np.clip(np.maximum(k * 5, incap * 1.0), 0, 1))
+        H['tipz'][f] = float(zend + EXT) * 1000      # mm from the distal joint to the end of the finger
+    # normals of the moved vertices, area-weighted over all faces (vertices that share a position share a normal)
+    key = np.round(P * 1e6).astype(np.int64)
+    _, grp = np.unique(key, axis=0, return_inverse=True); grp = grp.ravel()
+    t = P[H['idx']]; fn = np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0])
+    acc = np.zeros((grp.max() + 1, 3))
+    for c in range(3): np.add.at(acc, grp[H['idx'][:, c]], fn)
+    nn = acc[grp]; nn /= np.linalg.norm(nn, axis=1, keepdims=True) + 1e-12
+    q = moved[:, None]; nb = H['nrm'] * (1 - q) + nn * q
+    H['nrm'] = nb / (np.linalg.norm(nb, axis=1, keepdims=True) + 1e-12)
+    log(H['side'], 'tips reshaped', int((moved > 0).sum()), {f: round(v, 1) for f, v in H['tipz'].items()})
+
+def smooth(e0, e1, x):
+    t = np.clip((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t)
+for H in HANDS.values(): shape_tips(H)
+
 # ================================================================= UV ATLAS (both hands, one texel density)
 bpy.ops.wm.read_factory_settings(use_empty=True)
 objs = []
@@ -431,12 +497,16 @@ def fields(H, P, N):
             # ---- nail
             if True:
                 w = {'thumb': 0.82, 'pinky-finger': 0.74}.get(f, 0.78) * rad * 1000
-                z0 = (0.42 if not thumb else 0.40) * Ld; z1 = Ld * 1.0 + 0.6
+                # the plate ends where the fingertip starts to curl under (not on the cap), and is about 0.43 of
+                # the distal segment long
+                z1 = H['tipz'][f] - (2.3 if not thumb else 2.6); z0 = z1 - (0.43 if not thumb else 0.45) * Ld
+                nl = z1 - z0
                 u = cs * 1000 / w; v = (zt - z0) / (z1 - z0)
                 up_ok = smooth(0.0, 0.25, cos_t) * smooth(0.15, 0.45, ndors)
                 # inside: |u|<1, v>0.12u^2, v<1 ; the cuticle arc bows toward the knuckle
                 edge_side = 1 - np.abs(u); edge_prox = v - 0.16 * u * u
-                ins = smooth(-0.05, 0.08, edge_side) * smooth(-0.02, 0.05, edge_prox) * smooth(1.08, 1.0, v) * up_ok
+                endc = v * nl + 0.9 * u * u                       # mm; the cut end is rounded at the corners
+                ins = smooth(-0.05, 0.08, edge_side) * smooth(-0.02, 0.05, edge_prox) * smooth(nl + 0.3, nl - 0.1, endc) * up_ok
                 nail = ins
                 # relief: plate proud of the skin, grooves at the folds, a soft proximal fold
                 dist_edge = np.minimum(edge_side * w, edge_prox * (z1 - z0))     # mm to the boundary (inside > 0)
@@ -446,11 +516,15 @@ def fields(H, P, N):
                 h += 0.00007 * fold
                 h += 0.000006 * np.sin(u * 23 + np.sin(u * 7) * 0.5) * nail                    # faint longitudinal ridges
                 out['nail'][idx_m] = nail
-                lun = smooth(0.24, 0.10, edge_prox) * smooth(0.95, 0.6, np.abs(u)) * nail
+                # small faint lunula at the cuticle (biggest on the thumb), a ~1 mm free edge with a slightly
+                # irregular line, and a soft, barely darker onychodermal band just behind it
+                lun_w = (2.2 if thumb else 1.3) / nl
+                lun = smooth(lun_w, 0.25 * lun_w, edge_prox) * smooth(0.8, 0.45, np.abs(u)) * nail * (0.8 if thumb else 0.5)
                 out['lunula'][idx_m] = lun
-                free = smooth(0.84, 0.93, v) * nail
+                vm = endc + 0.16 * np.sin(u * 4.1 + 1.3 * len(f)) + 0.08 * np.sin(u * 9.7 + len(f))   # wobbled line
+                free = smooth(nl - 1.2, nl - 0.8, vm) * nail
                 out['free'][idx_m] = free
-                out['band'][idx_m] = gauss(v - 0.83, 0.03) * nail
+                out['band'][idx_m] = gauss(vm - (nl - 1.45), 0.4) * nail * (1 - free)
                 dark += 0.6 * groove
                 rough -= 0.0 * nail
                 # glove: no nails, just the finger
@@ -487,16 +561,20 @@ def fields(H, P, N):
             wob = 1 + 0.25 * vnoise3(P[pm], 300, 40 + seed)
             return gauss(d, width * wob) * k * (0.75 + 0.25 * vnoise3(P[pm], 160, 50 + seed))
         heart = crease_line([(1.08, 0.80), (0.8, 0.84), (0.55, 0.86), (0.33, 0.93), (0.22, 1.02)], 1, 0.0005, seed=1)
-        head = crease_line([(-0.06, 0.70), (0.15, 0.66), (0.4, 0.6), (0.62, 0.53), (0.72, 0.50)], 1, 0.00045, seed=2)
-        life = crease_line([(-0.04, 0.72), (0.04, 0.6), (0.08, 0.42), (0.13, 0.22), (0.2, 0.05), (0.28, -0.05)], 1, 0.00048, seed=3)
+        head = crease_line([(-0.06, 0.70), (0.15, 0.66), (0.4, 0.6), (0.62, 0.53), (0.72, 0.50)], 1, 0.00045, fade=(0.12, 1.0), seed=2)
+        life = crease_line([(-0.04, 0.72), (0.04, 0.6), (0.08, 0.42), (0.13, 0.22), (0.2, 0.05), (0.28, -0.05)], 1, 0.00048, fade=(0.1, 1.0), seed=3)
         fate = crease_line([(0.48, 0.05), (0.47, 0.3), (0.45, 0.55)], 1, 0.0003, seed=4) * 0.5
         wrist1 = crease_line([(-0.25, -0.12), (0.2, -0.10), (0.6, -0.11), (1.1, -0.13)], 1, 0.0005, seed=5)
         wrist2 = crease_line([(-0.25, -0.24), (0.3, -0.21), (0.8, -0.22), (1.1, -0.24)], 1, 0.00035, seed=6) * 0.7
         pc = (heart + head + life + fate + wrist1 + wrist2)
         # fine palm lines: many short shallow creases from directional noise
         fine = np.clip(1 - np.abs(fbm3(P[pm] * np.array([1, 1, 1]), 260, 9, 3)) * 7, 0, 1) ** 3
-        h -= vent * (0.00032 * np.clip(pc, 0, 1.3) + 0.00004 * fine); crease += vent * (pc + 0.3 * fine)
-        dark += vent * 0.4 * np.clip(pc, 0, 1)
+        # palm lines stay on the palm proper: they fade before the radial and ulnar edges turn toward the back
+        # (the head and life lines start at the edge and wrap the thumb base, which a grip turns to face the eye from behind;
+        # carried that far they read as cracks on the back of the hand)
+        vpl = smooth(-0.55, -0.8, un)
+        h -= vpl * (0.00032 * np.clip(pc, 0, 1.3) + 0.00004 * fine); crease += vpl * (pc + 0.3 * fine)
+        dark += vpl * 0.4 * np.clip(pc, 0, 1)
         # thenar / hypothenar pads: pinker
         then = gauss(np.hypot((x + 0.05) / 0.25, (y - 0.25) / 0.35), 1.0)
         hypo = gauss(np.hypot((x - 0.95) / 0.2, (y - 0.4) / 0.4), 1.0)
@@ -506,17 +584,16 @@ def fields(H, P, N):
             kn = ch[f]['P'][1] - r['o']; kx = (kn @ r['s'] - r['x0']) / r['width']; ky = (kn @ r['e']) / r['length']
             A = np.array([0.42 + 0.06 * (fi - 1.5), -0.25]) * sc; B = np.array([kx, ky]) * sc
             d, t = seg_dist2d(q * sc, A, B)
-            vis = smooth(0.25, 0.8, t) * smooth(1.02, 0.9, t) * (1.0 if fi < 3 else 0.6)
-            prof = np.clip(1 - (d / 0.0034) ** 2, 0, 1) ** 2
-            h += dors * 0.0005 * prof * vis
-        # back: knuckle valleys
-        # veins (slightly raised, a cool tint)
+            # broad, low ridges that only rise toward the knuckles: soft shading, never an outline
+            vis = smooth(0.45, 0.9, t) * smooth(1.02, 0.92, t) * (1.0 if fi < 3 else 0.6)
+            h += dors * 0.00018 * gauss(d, 0.0032) * vis
+        # veins: broad, soft, low relief (a Gaussian profile has no shoulder that could catch the light as a line)
+        # and only the faintest cool tint, spread wider than the vein itself
         for line, s in VEINS:
             c = line * sc; d, al, tot = poly_dist(q * sc, c)
-            wv = 0.0024 * s * (1 + 0.15 * vnoise3(P[pm], 200, 77))
-            prof = np.clip(1 - (d / wv) ** 2, 0, 1) ** 2
-            h += dors * 0.0004 * s * prof * (0.75 + 0.25 * vnoise3(P[pm], 120, 78))
-            vein = np.maximum(vein, dors * smooth(1.0, 0.3, d / wv) * min(1, s))
+            wv = 0.0016 * s * (1 + 0.15 * vnoise3(P[pm], 200, 77))
+            h += dors * 0.00009 * min(1, s) * gauss(d, wv) * (0.7 + 0.3 * vnoise3(P[pm], 120, 78))
+            vein = np.maximum(vein, dors * gauss(d, 1.6 * wv) * min(1, s) * (0.6 + 0.4 * vnoise3(P[pm], 60, 79)))
         # back of the hand: faint diamond creases
         h -= dors * 0.00002 * np.clip(1 - np.abs(vnoise3(P[pm], 420, 21)) * 6, 0, 1)
         # glove: the three stitched "points" on the back, a seam round the thumb, a hem at the wrist
@@ -533,7 +610,7 @@ def fields(H, P, N):
         hg += 0.00025 * hem
         hsti = gauss(ym + 0.17 * r['length'] - 0.0018, 0.00028) * smooth(0.5, 0.9, 0.5 + 0.5 * np.cos(np.arctan2(un, (P[pm] - r['o']) @ r['s']) * 70))
         hg += 0.0001 * hsti; stitch = np.maximum(stitch, hsti)
-        hg -= vent * 0.00028 * np.clip(heart + head + life, 0, 1) * 0.6
+        hg -= vpl * 0.00028 * np.clip(heart + head + life, 0, 1) * 0.6
         gwear += 0.6 * dors * smooth(0.6, 0.95, y)
         out['h'][pm] += h; out['dark'][pm] += dark; out['red'][pm] += red; out['crease'][pm] += crease; out['vein'][pm] = vein
         out['hg'][pm] += hg; out['stitch'][pm] = np.maximum(out['stitch'][pm], stitch); out['gwear'][pm] += gwear
@@ -625,14 +702,15 @@ col = col * (1 + 0.10 * lo + 0.07 * mott * np.array([1.0, 0.8, 0.7]) + 0.05 * F[
 col = col * (1 - red[..., None] * np.array([-0.04, 0.2, 0.17]))                  # redness: less green/blue
 col = col * (1 - 0.32 * np.clip(dark, 0, 1)[..., None] - 0.38 * np.clip(F['crease'], 0, 1.2)[..., None] * np.array([0.85, 1.0, 1.0]))
 vein = F['vein'][..., None]
-col = col * (1 - vein * np.array([0.08, 0.0, -0.06]))
+col = col * (1 - vein * np.array([0.035, 0.01, -0.025]))
 col = col * (1 - 0.18 * F['spots'][..., None] * (1 - vent[..., None]) * np.array([0.8, 1, 1.1]))
 col = col * (1 - 0.06 * F['side'][..., None] * np.array([0.5, 1, 1]))
 nail = F['nail'][..., None]; lun = F['lunula'][..., None]; free = F['free'][..., None]; band = F['band'][..., None]
-nail_c = np.array([0.56, 0.33, 0.27]) * (1 + 0.04 * F['noise_hi'][..., None])
-nail_c = nail_c * (1 - lun) + np.array([0.64, 0.47, 0.40]) * lun
-nail_c = nail_c * (1 - band * np.array([0.05, 0.25, 0.25]))
-nail_c = nail_c * (1 - free) + np.array([0.76, 0.69, 0.58]) * free
+# one even pink-beige plate (the bed shows through), a faint paler lunula, a barely pinker band, a narrow off-white tip
+nail_c = np.array([0.55, 0.36, 0.30]) * (1 + 0.03 * F['noise_hi'][..., None])
+nail_c = nail_c * (1 - 0.5 * lun) + np.array([0.62, 0.46, 0.40]) * 0.5 * lun
+nail_c = nail_c * (1 - 0.6 * band * np.array([0.0, 0.10, 0.08]))
+nail_c = nail_c * (1 - free) + np.array([0.64, 0.56, 0.47]) * free
 col = col * (1 - nail) + nail_c * nail
 col = col * (0.55 + 0.45 * F['ao'][..., None] ** 0.6)
 alb = fill_pad(lin2srgb(col), mask)
