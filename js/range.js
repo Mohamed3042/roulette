@@ -21,7 +21,7 @@ const BOOTH_X = 0.84, BOOTH_Z = [0.5, -1.2];
 const PLANK = { x: -1.55, z: -6, y: -0.95, len: 1.2, d: 0.22 };
 const RACK = { x: 1.45, z: -8.2, y: -0.78 };
 const SPIN = { x: -2.05, z: -12, y: -0.5 };
-const PAPERS = [{ x: -0.42, z: -5, y: 0.2, size: 1 }, { x: 0.55, z: -10, y: 0.24, size: 1.45 }, { x: -0.14, z: -15, y: 0.28, size: 1.9 }];
+const PAPERS = [{ x: -0.42, z: -5, y: 0.2, size: 1.2 }, { x: 0.55, z: -10, y: 0.24, size: 2.1 }, { x: -0.14, z: -15, y: 0.28, size: 3 }];
 const MUZZLE_V = 260;   // m/s, a .45 ACP: the hit lands a beat after the shot at 15 m
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -94,7 +94,19 @@ function makeTextures() {
     const v = (0.2 + (n64[(y * 2) * S + x * 2] - 0.5) * 0.07 + (Math.random() - 0.5) * 0.06 + (x % 64 < 2 ? -0.06 : 0)) * 255;
     return rgb(v, 0.9, 0.88, 0.86);
   });
-  return { concrete, block, wood, rubber, felt };
+  const fabric = pixels(256, (x, y, i) => {
+    // Acoustic panel cloth: a fine basket weave over soft mottling.
+    const weave = ((x >> 1) + (y >> 1)) % 2 ? 0.035 : -0.035;
+    const v = (0.27 + weave + (n16[(y * 2) * S + x * 2] - 0.5) * 0.06 + (Math.random() - 0.5) * 0.05) * 255;
+    return rgb(v, 0.92, 0.9, 0.88);
+  });
+  const mat = pixels(256, (x, y, i) => {
+    // Rubber bench mat: fine pebble grain with scuffs.
+    const scuff = Math.max(0, n4[(y * 2) * S + x * 2] - 0.62) * 0.5;
+    const v = (0.1 + Math.random() * 0.05 + (n64[(y * 2) * S + x * 2] - 0.5) * 0.05 + scuff) * 255;
+    return rgb(v, 1, 0.97, 0.94);
+  });
+  return { concrete, block, wood, rubber, felt, fabric, mat };
 }
 
 // Floor paint: the firing line and the distance numbers, worn.
@@ -145,14 +157,16 @@ export function createRange(ctx) {
     ceil: new THREE.MeshStandardMaterial({ color: 0x1a1613, roughness: 0.95 }),
     wood: new THREE.MeshStandardMaterial({ map: T.wood, roughness: 0.74, metalness: 0 }),
     darkWood: new THREE.MeshStandardMaterial({ map: T.wood, color: 0x6a4a34, roughness: 0.6, metalness: 0 }),
-    // Overhead baffles hang right in front of the lamps: unlit, so they read as dark timber, never as glowing slabs.
-    baffle: new THREE.MeshBasicMaterial({ map: T.wood, color: 0x2e2219 }),
+    // Acoustic baffles: dark cloth over rubber, framed in timber.
+    baffle: new THREE.MeshStandardMaterial({ map: T.fabric, roughness: 1, metalness: 0 }),
+    mat: new THREE.MeshStandardMaterial({ map: T.mat, roughness: 0.82, metalness: 0 }),
     berm: new THREE.MeshStandardMaterial({ map: T.rubber, roughness: 0.97, metalness: 0 }),
     felt: new THREE.MeshStandardMaterial({ map: T.felt, roughness: 0.96, metalness: 0 }),
     steel: new THREE.MeshStandardMaterial({ color: 0x2c2b29, roughness: 0.45, metalness: 0.85 }),
     trim: new THREE.MeshStandardMaterial({ color: 0x8c7650, roughness: 0.35, metalness: 0.9 }),
   };
   const statics = new Map(), hitMeshes = [];
+  const wireMat = new THREE.MeshBasicMaterial({ color: 0x0c0b0a });
   const add = (mat, geo) => { if (!statics.has(mat)) statics.set(mat, []); statics.get(mat).push(geo); };
 
   // Floor, ceiling, walls, the back wall.
@@ -167,14 +181,27 @@ export function createRange(ctx) {
   const bermLen = Math.hypot(BERM_Z - BACK_Z, H * 0.92), bermA = Math.atan2(H * 0.92, BERM_Z - BACK_Z);
   add(mats.berm, uvScale(place(new THREE.PlaneGeometry(HALF_W * 2, bermLen), 0, FLOOR_Y + H * 0.46, (BERM_Z + BACK_Z) / 2, -bermA), 4, 2));
   add(mats.darkWood, box(HALF_W * 2, 0.2, 0.12, 0, FLOOR_Y + 0.1, BERM_Z + 0.06, 0, 0, 0, 1.2));
-  // Overhead safety baffles, angled so a stray shot can never reach the ceiling: dark steel, a timber face.
-  for (let z = -3.4; z > BERM_Z + 0.8; z -= 2.6) {
-    add(mats.baffle, box(HALF_W * 2, 0.04, 0.85, 0, CEIL_Y - 0.36, z, -0.6, 0, 0, 1.2));
-    add(mats.steel, box(HALF_W * 2, 0.05, 0.05, 0, CEIL_Y - 0.1, z - 0.33, 0, 0, 0));
+  // Parts built in a panel's own frame, then moved into place as one.
+  const M4 = (x, y, z, rx = 0, ry = 0, rz = 0) => new THREE.Matrix4().compose(V(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), V(1, 1, 1));
+  const at = (m, mat, geo) => add(mat, geo.applyMatrix4(m));
+  const edgeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffc68a).multiplyScalar(0.55) });
+  // Overhead safety baffles: angled acoustic panels across the range, timber-framed, a warm light strip on the lower edge.
+  for (const z of [-3.4, -6.9, -10.4, -13.8]) {
+    const m = M4(0, CEIL_Y - 0.34, z, -0.62, 0, 0), W = HALF_W * 2 - 0.1, D = 0.8;
+    at(m, mats.baffle, box(W, 0.07, D, 0, 0, 0, 0, 0, 0, 1.5));
+    for (const e of [-1, 1]) at(m, mats.darkWood, box(W + 0.02, 0.09, 0.035, 0, 0, e * (D / 2 + 0.0175), 0, 0, 0, 1.4));
+    at(m, edgeMat, box(W - 0.4, 0.01, 0.014, 0, -0.04, -D / 2 - 0.02));
+    for (const x of [-2.2, 0, 2.2]) add(mats.steel, box(0.012, 0.3, 0.012, x, CEIL_Y - 0.15, z + 0.2));
   }
-  // Side baffles: a sawtooth of angled plywood panels down both walls, so a stray shot is turned toward the berm.
-  for (let z = -1.6; z > BERM_Z + 0.9; z -= 1.15) for (const s of [-1, 1]) {
-    add(mats.wood, box(0.03, H * 0.62, 1.05, s * (HALF_W - 0.28), FLOOR_Y + 0.35 + H * 0.31, z, 0, s * 0.48, 0, 1.2));
+  // Side baffles: angled acoustic panels down both walls, so a stray shot is turned toward the berm.
+  // Dark cloth face, a timber frame, a brass edge on the leading side that catches the lamps.
+  for (let z = -1.7; z > BERM_Z + 0.9; z -= 1.2) for (const s of [-1, 1]) {
+    const ph = H * 0.66, pw = 1.08, m = M4(s * (HALF_W - 0.3), FLOOR_Y + 0.42 + ph / 2, z, 0, s * 0.5, 0);
+    at(m, mats.baffle, box(0.07, ph, pw, 0, 0, 0, 0, 0, 0, 1.5));
+    for (const e of [-1, 1]) at(m, mats.darkWood, box(0.09, 0.05, pw + 0.04, 0, e * (ph / 2 + 0.025), 0, 0, 0, 0, 1.4));
+    at(m, mats.darkWood, box(0.09, ph + 0.1, 0.04, 0, 0, -pw / 2 - 0.02, 0, 0, 0, 1.4));
+    at(m, mats.trim, box(0.095, ph + 0.1, 0.012, 0, 0, pw / 2 + 0.006));
+    at(m, mats.steel, box(0.03, 0.42, 0.03, -s * 0.06, -ph / 2 - 0.21, 0));   // stand-off foot
   }
   // A steel kick plate along the foot of each wall.
   for (const s of [-1, 1]) add(mats.steel, box(0.02, 0.35, L, s * (HALF_W - 0.01), FLOOR_Y + 0.175, cz));
@@ -189,12 +216,39 @@ export function createRange(ctx) {
   const shelf = new THREE.Mesh(box(SHELF.x1 - SHELF.x0, 0.04, SHELF.z1 - SHELF.z0, 0, SHELF_Y - 0.02, (SHELF.z0 + SHELF.z1) / 2, 0, 0, 0, 1.4), shelfMat);
   shelf.receiveShadow = true; shelf.userData.kind = 'wood'; room.add(shelf); hitMeshes.push(shelf);
   add(mats.steel, box(SHELF.x1 - SHELF.x0, 0.012, 0.02, 0, SHELF_Y + 0.004, SHELF.z0 + 0.01));
-  // Paper carriers: a track on the ceiling for each lane.
-  for (const p of PAPERS) add(mats.steel, box(0.05, 0.035, -p.z + 0.4, p.x, CEIL_Y - 0.2, p.z / 2 - 0.2));
+  // Neighbouring lanes: felt partitions either side, so the line reads as one booth in a row.
+  for (const s of [-1, 1]) {
+    const x = s * 2.5;
+    add(mats.felt, box(0.06, 2.15, BOOTH_Z[0] - BOOTH_Z[1], x, FLOOR_Y + 1.075, (BOOTH_Z[0] + BOOTH_Z[1]) / 2, 0, 0, 0, 0.8));
+    add(mats.darkWood, box(0.08, 2.19, 0.04, x, FLOOR_Y + 1.095, BOOTH_Z[1]));
+    add(mats.darkWood, box(0.08, 0.04, BOOTH_Z[0] - BOOTH_Z[1] + 0.02, x, FLOOR_Y + 2.17, (BOOTH_Z[0] + BOOTH_Z[1]) / 2));
+    add(mats.felt, box(1.6, SHELF_Y - 0.04 - FLOOR_Y, 0.05, s * 1.67, (SHELF_Y - 0.04 + FLOOR_Y) / 2, SHELF.z0 + 0.03, 0, 0, 0, 0.8));
+    add(shelfMat, box(1.6, 0.04, SHELF.z1 - SHELF.z0, s * 1.67, SHELF_Y - 0.02, (SHELF.z0 + SHELF.z1) / 2, 0, 0, 0, 1.4));
+  }
+  // The bench: a rubber mat on the laminate, a rounded hardwood nosing on the range side.
+  add(mats.mat, box(SHELF.x1 - SHELF.x0 - 0.12, 0.006, SHELF.z1 - SHELF.z0 - 0.1, 0, SHELF_Y + 0.003, (SHELF.z0 + SHELF.z1) / 2 + 0.03, 0, 0, 0, 2.5));
+  add(mats.darkWood, uvScale(place(new THREE.CylinderGeometry(0.024, 0.024, SHELF.x1 - SHELF.x0 + 0.02, 16), 0, SHELF_Y - 0.018, SHELF.z0 - 0.004, 0, 0, Math.PI / 2), 1, 3));
+  // Carrier control box on the right partition: two buttons.
+  add(mats.steel, box(0.04, 0.14, 0.2, BOOTH_X - 0.05, SHELF_Y + 0.22, -0.55));
+  for (const [y, c] of [[0.25, 0], [0.19, 1]]) add(c ? mats.trim : mats.darkWood, place(new THREE.CylinderGeometry(0.014, 0.014, 0.02, 12), BOOTH_X - 0.075, SHELF_Y + y, -0.5, 0, 0, Math.PI / 2));
+  // Paper carriers: an I-beam rail per lane from the booth to the target, with the drive cable alongside.
+  for (const p of PAPERS) {
+    const len = -p.z + 0.4, zc = p.z / 2 - 0.2, y = CEIL_Y - 0.17;
+    add(mats.steel, box(0.07, 0.008, len, p.x, y, zc));
+    add(mats.steel, box(0.008, 0.06, len, p.x, y - 0.034, zc));
+    add(mats.steel, box(0.07, 0.008, len, p.x, y - 0.068, zc));
+    for (const s of [-1, 1]) add(wireMat, place(new THREE.CylinderGeometry(0.0025, 0.0025, len, 4), p.x + s * 0.05, y - 0.05, zc, Math.PI / 2));
+    for (let z = -0.6; z > p.z; z -= 2.5) add(mats.steel, box(0.01, 0.17, 0.01, p.x, CEIL_Y - 0.085, z));
+  }
   // Floor paint.
   const markMat = (t) => new THREE.MeshStandardMaterial({ map: t, transparent: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, depthWrite: false });
   const line = new THREE.Mesh(place(new THREE.PlaneGeometry(HALF_W * 2 - 0.2, 0.08), 0, FLOOR_Y + 0.002, BOOTH_Z[1] - 0.25, -Math.PI / 2), markMat(floorMark('', 64, 16)));
   room.add(line);
+  // Lane lines down the range, between the booths.
+  const laneMat = markMat(floorMark('', 64, 16)); laneMat.opacity = 0.7;
+  const z0 = BOOTH_Z[1] - 0.25, z1 = BERM_Z + 0.4, lanes = [];
+  for (const x of [-2.5, -0.84, 0.84, 2.5]) lanes.push(place(new THREE.PlaneGeometry(0.05, z0 - z1), x, FLOOR_Y + 0.002, (z0 + z1) / 2, -Math.PI / 2));
+  room.add(new THREE.Mesh(mergeGeometries(lanes), laneMat));
   for (const [d, x] of [[5, -1.6], [10, 1.6], [15, -1.6]]) {
     const m = new THREE.Mesh(place(new THREE.PlaneGeometry(0.9, 0.45), x, FLOOR_Y + 0.002, -d, -Math.PI / 2), markMat(floorMark(String(d))));
     room.add(m);
@@ -224,14 +278,14 @@ export function createRange(ctx) {
   pendant(-1.3, -5.5, 52); pendant(1.35, -8.6, 56); pendant(-1.4, -12.1, 60);
   const shafts = new THREE.Mesh(mergeGeometries(beams), beamMat); shafts.renderOrder = 3; room.add(shafts);
   // Target lights: a long fixture under the first baffle, washing the far targets and the berm.
-  add(bulbMat, box(2.6, 0.025, 0.06, 0, CEIL_Y - 0.5, -3.85));
-  add(mats.steel, box(2.7, 0.06, 0.14, 0, CEIL_Y - 0.46, -3.85));
-  const flood = new THREE.SpotLight(0xffe2bf, 230, 0, 0.5, 0.8, 2);
-  flood.position.set(0, CEIL_Y - 0.54, -3.9); flood.target.position.set(0.1, -0.5, -12.5); room.add(flood, flood.target); lamps.push(flood);
-  const ambient = new THREE.HemisphereLight(0x5f6670, 0x24170e, 1.25); room.add(ambient);
+  add(bulbMat, box(1.6, 0.025, 0.06, 0, CEIL_Y - 0.62, -6));
+  add(mats.steel, box(1.7, 0.06, 0.14, 0, CEIL_Y - 0.58, -6));
+  const flood = new THREE.SpotLight(0xffe2bf, 120, 0, 0.7, 1, 2);
+  flood.position.set(0, CEIL_Y - 0.66, -6.05); flood.target.position.set(0.1, -0.7, -14); room.add(flood, flood.target); lamps.push(flood);
+  const ambient = new THREE.HemisphereLight(0x5f6670, 0x24170e, 1.7); room.add(ambient);
 
   // Merge each material's static geometry into one mesh.
-  const KIND = new Map([[mats.floor, 'concrete'], [mats.wall, 'concrete'], [mats.ceil, 'concrete'], [mats.wood, 'wood'], [mats.darkWood, 'wood'], [mats.baffle, 'wood'], [mats.berm, 'berm'], [mats.felt, 'felt'], [mats.steel, 'steel'], [shadeMat, 'steel'], [bulbMat, 'steel']]);
+  const KIND = new Map([[mats.floor, 'concrete'], [mats.wall, 'concrete'], [mats.ceil, 'concrete'], [mats.wood, 'wood'], [mats.darkWood, 'wood'], [mats.baffle, 'felt'], [mats.mat, 'felt'], [mats.trim, 'steel'], [edgeMat, 'steel'], [shelfMat, 'wood'], [wireMat, 'steel'], [mats.berm, 'berm'], [mats.felt, 'felt'], [mats.steel, 'steel'], [shadeMat, 'steel'], [bulbMat, 'steel']]);
   for (const [mat, list] of statics) {
     const m = new THREE.Mesh(mergeGeometries(list, false), mat);
     m.userData.kind = KIND.get(mat) || 'concrete'; m.matrixAutoUpdate = false; m.updateMatrix();
@@ -245,15 +299,14 @@ export function createRange(ctx) {
   const mark = (m, kind, extra = {}) => { m.userData.kind = kind; Object.assign(m.userData, extra); tgtHit.push(m); return m; };
 
   // Paper: hanging from a trolley on the carrier track.
-  const wireMat = new THREE.MeshBasicMaterial({ color: 0x0c0b0a });
   const papers = PAPERS.map((p) => {
     const t = createTarget();
     t.place(sets.paper, V(p.x, p.y - 0.25, p.z), 0.5, 0.5, 1, 'square', 0);
     // Paper under target lights reads bright: a little of its own printed face as glow (holes stay dark).
-    Object.assign(t.sheet.material, { envMapIntensity: 0.35, emissive: new THREE.Color(0xfff2dc), emissiveMap: t.sheet.material.map, emissiveIntensity: p.z > -6 ? 0.28 : 0.14 });
+    Object.assign(t.sheet.material, { envMapIntensity: 0.35, emissive: new THREE.Color(0xfff2dc), emissiveMap: t.sheet.material.map, emissiveIntensity: p.z > -6 ? 0.1 : 0.03, color: new THREE.Color(p.z > -6 ? 0xffffff : p.z > -12 ? 0xb8b8b8 : 0xe0e0e0) });
     mark(t.sheet, 'paper', { target: t, size: p.size, dist: -p.z });
     const hw = new THREE.Group(); hw.position.set(p.x, 0, p.z); sets.paper.add(hw);
-    const trolley = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, 0.16), mats.steel); trolley.position.y = CEIL_Y - 0.25; hw.add(trolley);
+    const trolley = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, 0.16), mats.steel); trolley.position.y = CEIL_Y - 0.27; hw.add(trolley);
     const bar = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.018, 0.02), mats.steel); bar.position.y = p.y + 0.012; hw.add(bar);
     for (const s of [-1, 1]) {
       const len = CEIL_Y - 0.28 - (p.y + 0.02);
@@ -422,7 +475,7 @@ export function createRange(ctx) {
   const RL = { magOut: 0, np: 1, lh: 0, thumb: 0 };
   const queue = [];   // bullets in flight: { t, fn }
   const tilt = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, k: 0 };
-  const SHOW = { x: -0.05, y: 0.005, z: 0, rx: 0.04, ry: -1.1, rz: 0.12 };   // empty gun: turn it a little so the locked-back slide and open port show
+  const SHOW = { x: -0.01, y: 0.01, z: 0, rx: 0.06, ry: 0.08, rz: 0.38 };   // empty gun: cant it toward the player so the locked-back slide shows, still in the hand
   const report = () => ctx.onAmmo?.({ chamber: st.chamber, mag: st.mag, locked: st.locked, reloading: st.reloading });
   const tally = () => ctx.onTally?.(st.hits, st.shots);
 
@@ -778,7 +831,7 @@ export function createRange(ctx) {
 
   return {
     group, gun, sights, ready, tilt, SHOW, papers, plates, spinner, items, st, RL, RH, GRIP, SUP, SUP_POSE, MAGH, MAG_POSE, REST_L, RELOAD, FORE_ADS, lamps, flood, ambient, mats,
-    HIP: { land: { x: 0.104, y: -0.09, z: -0.29 }, port: { x: 0.044, y: -0.104, z: -0.37 }, rz: -0.1, D: 9 },
+    HIP: { land: { x: 0.125, y: -0.1, z: -0.4 }, port: { x: 0.052, y: -0.115, z: -0.48 }, rz: -0.1, D: 9 },
     ADS_EYE: { land: 0.55, port: 0.58 },
     LOOK: { pitch: -0.035, limY: 0.42, limP: 0.24 },
     SLEEVE: { sleeve: '#3a3b34', cuff: '#2a2a27', watch: false },
