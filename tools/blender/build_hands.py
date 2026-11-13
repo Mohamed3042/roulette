@@ -11,9 +11,9 @@
 #   matrices as the source, mesh re-split along the new UV seams. Compress them with Draco (docs/HANDS-REAL.md) into
 #   assets/models/hand_left.glb and hand_right.glb.
 #   hand_albedo.webp   2048 sRGB, the "medium" skin; other tones are graded in js/hands.js with the pigment mask
-#   hand_height.webp   2048 grey, macro relief (creases, knuckles, tendons, veins, nail folds); hands.js turns it into normals
+#   hand_nx/ny.webp    2048 grey, macro relief as surface slope along u and v (creases, knuckles, tendons, veins, nail folds)
 #   hand_orm.webp      1024 RGBA: R occlusion, G roughness, B pigment weight (palm and nails take less tone), A glove stitches
-#   hand_glove_h.webp  1024 grey, glove relief (seams, stitching, leather creases at the joints)
+#   hand_glove_nx/ny   1024 grey, glove relief as slopes (seams, stitching, leather creases at the joints)
 #   hand_pores.webp    512 grey tile, skin micro relief (furrow network, pores)
 #   hand_leather.webp  512 grey tile, pebbled leather grain
 # Both hands share one UV atlas, so one set of maps serves the pair. The bake is deterministic (fixed seeds).
@@ -602,11 +602,17 @@ def fill_pad(a, mask, iters=24):
 F = bake(RES, pad=10)
 mask = F['mask']
 
-# ---- height (macro): metres -> 0..1 around 0.5
-HSCALE = 0.0016     # full range in metres (stored value 0.5 = 0)
-height = 0.5 + F['h'] / HSCALE
-height = fill_pad(height, mask)
-save('hand_height', height, 90)
+# ---- relief: the height (m) becomes a surface slope along +u and +v (v down), stored as two grey maps. Slopes are
+# taken here in float on the padded (extrapolated) field, so lossy compression only adds tiny direction noise; a lossy
+# height map differentiated in the shader showed every compression block.
+SMAX = 1.0
+def slopes(h, res):
+    h = fill_pad(h, mask if res == RES else mh)
+    du = 2.0 / res * UVM
+    gx = (np.roll(h, -1, 1) - np.roll(h, 1, 1)) / du; gy = (np.roll(h, -1, 0) - np.roll(h, 1, 0)) / du
+    return 0.5 + np.clip(gx, -SMAX, SMAX) / (2 * SMAX), 0.5 + np.clip(gy, -SMAX, SMAX) / (2 * SMAX)
+gx, gy = slopes(F['h'].astype(np.float64), RES)
+save('hand_nx', gx, 90); save('hand_ny', gy, 90)
 
 # ---- albedo (linear "medium" skin), stored sRGB
 vent = F['vent']; red = np.clip(F['red'], 0, 1.5); dark = np.clip(F['dark'], 0, 1.5)
@@ -642,9 +648,9 @@ orm = orm.reshape(ORM_RES, 2, ORM_RES, 2, 4).mean((1, 3)); mh = mask.reshape(ORM
 save('hand_orm', fill_pad(orm, mh), 90)
 
 # ---- glove relief (leather creases, seams, stitching), half resolution
-hg = 0.5 + (F['hg'] + 0.25 * np.clip(F['h'], -0.0006, 0) - 0.0 * F['nail']) / HSCALE
-hg = hg.reshape(ORM_RES, 2, ORM_RES, 2).mean((1, 3))
-save('hand_glove_h', fill_pad(hg, mh), 90)
+hg = (F['hg'] + 0.25 * np.clip(F['h'], -0.0006, 0)).reshape(ORM_RES, 2, ORM_RES, 2).mean((1, 3))
+gx, gy = slopes(hg.astype(np.float64), ORM_RES)
+save('hand_glove_nx', gx, 90); save('hand_glove_ny', gy, 90)
 
 # ================================================================= DETAIL TILES (periodic)
 def voronoi_tile(S, cells, seed, jitter=0.85):
@@ -683,16 +689,16 @@ for _ in range(420):
     dx = (xs - cx + TILE / 2) % TILE - TILE / 2; dy = (ys - cy + TILE / 2) % TILE - TILE / 2
     pores += np.exp(-(dx * dx + dy * dy) / (r * r)) * rng.uniform(0.5, 1)
 skin = 0.5 - 0.22 * fur - 0.18 * fur2 - 0.25 * np.clip(pores, 0, 1) + 0.05 * periodic_noise(TILE, 40, 6) + 0.05 * periodic_noise(TILE, 9, 7)
-save('hand_pores', np.clip(skin, 0, 1), 86)
+save('hand_pores', np.clip(skin, 0, 1), 100)
 
 # leather: pebbled grain, cells about 0.8 mm over a 20 mm tile, fine pits
 L1, L2, LID = voronoi_tile(TILE, 25, 8, 0.95)
 cellh = np.random.default_rng(9).random(25 * 25)[LID]
 leather = 0.35 + 0.28 * np.clip(1 - (L1 / 0.75) ** 2, 0, 1) ** 0.6 * (0.7 + 0.3 * cellh) - 0.25 * np.exp(-((L2 - L1) / 0.09) ** 2) + 0.04 * periodic_noise(TILE, 70, 10)
-save('hand_leather', np.clip(leather, 0, 1), 86)
+save('hand_leather', np.clip(leather, 0, 1), 100)
 
 # ================================================================= MESHES
 for side, H in HANDS.items():
     p = os.path.join(WORK, f'hand_{side}.raw.glb'); write_glb(p, H['j'], H['acc'], H['V']); log('wrote', p, os.path.getsize(p))
-json.dump({'uvMeters': UVM, 'heightRange': HSCALE, 'tileSkin': 0.012, 'tileLeather': 0.020}, open(os.path.join(WORK, 'hand_maps.json'), 'w'))
+json.dump({'uvMeters': UVM, 'slopeMax': SMAX, 'tileSkin': 0.012, 'tileLeather': 0.020}, open(os.path.join(WORK, 'hand_maps.json'), 'w'))
 log('done')

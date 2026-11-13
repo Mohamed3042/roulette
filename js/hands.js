@@ -24,11 +24,11 @@ export const SKINS = {
 
 const MODELS = new URL('../assets/models/', import.meta.url).href;
 const DRACO = new URL('../vendor/three/addons/libs/draco/gltf/', import.meta.url).href;
-// Must match tools/blender/build_hands.py: map size, stored height range (m), physical size of the tiles (m).
-const MAP = { res: 2048, tile: 512, heightRange: 0.0016, tileSkin: 0.012, tileLeather: 0.02 };
+// Must match tools/blender/build_hands.py: tile size (px), slope range of the relief maps, physical size of the tiles (m).
+const MAP = { tile: 512, slopeMax: 1.0, tileSkin: 0.012, tileLeather: 0.02 };
 
 // One material per look, on MeshPhysicalMaterial:
-//  - normals from the baked height map (4 taps at full resolution) plus a tiled micro relief (pores, or leather grain),
+//  - normals from the baked slope maps (u and v) plus a tiled micro relief (pores, or leather grain),
 //  - albedo graded per look with the pigment mask; gloves take a leather colour and the stitch mask,
 //  - wrapped direct diffuse (see `wrap`).
 function skinMaterial(look, T, uvMeters) {
@@ -36,7 +36,7 @@ function skinMaterial(look, T, uvMeters) {
   const m = new THREE.MeshPhysicalMaterial({
     color: glove ? s.color : 0xffffff, map: glove ? null : T.albedo,
     roughness: glove ? 0.55 : 1, roughnessMap: glove ? null : T.orm, aoMap: T.orm, aoMapIntensity: 1,
-    normalMap: glove ? T.gloveH : T.height,
+    normalMap: glove ? T.gloveNx : T.nx,
     specularIntensity: s.spec, sheen: glove ? 0.4 : 0.22, sheenRoughness: glove ? 0.45 : 0.6, sheenColor: glove ? 0x6a5848 : 0xc89282,
     clearcoat: glove ? 0.3 : 0.1, clearcoatRoughness: glove ? 0.42 : 0.36,
     emissive: glove ? 0x000000 : s.sss, emissiveIntensity: glove ? 0 : 0.03,
@@ -44,26 +44,24 @@ function skinMaterial(look, T, uvMeters) {
   const detail = glove ? T.leather : T.pores;
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
-      uOrm: { value: T.orm }, uDetail: { value: detail }, uGain: { value: new THREE.Vector3(...(s.gain || [1, 1, 1])) },
-      uSlope: { value: MAP.heightRange / uvMeters }, uDetailRep: { value: uvMeters / (glove ? MAP.tileLeather : MAP.tileSkin) },
+      uOrm: { value: T.orm }, uNy: { value: glove ? T.gloveNy : T.ny }, uDetail: { value: detail }, uGain: { value: new THREE.Vector3(...(s.gain || [1, 1, 1])) },
+      uDetailRep: { value: uvMeters / (glove ? MAP.tileLeather : MAP.tileSkin) },
       uDetailK: { value: glove ? 2.2 : 1.6 }, uWrap: { value: new THREE.Vector3(...s.wrap) },
     });
-    sh.fragmentShader = 'uniform sampler2D uOrm, uDetail; uniform vec3 uGain, uWrap; uniform float uSlope, uDetailRep, uDetailK;\n' + sh.fragmentShader
+    sh.fragmentShader = 'uniform sampler2D uOrm, uNy, uDetail; uniform vec3 uGain, uWrap; uniform float uDetailRep, uDetailK;\n' + sh.fragmentShader
       .replace('#include <map_fragment>', `#include <map_fragment>
         vec4 ormT = texture2D( uOrm, vNormalMapUv );
         ${glove ? `diffuseColor.rgb *= 0.7 + 0.3 * ormT.r;
         diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.2, 0.17, 0.14 ), smoothstep( 0.2, 0.8, ormT.a ) * 0.8 );`
         : 'diffuseColor.rgb *= mix( vec3( 1.0 ), uGain, ormT.b );'}`)
-      .replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', `
-        const float hT = 1.0 / ${MAP.res}.0;
-        vec2 g = vec2( texture2D( normalMap, vNormalMapUv + vec2( hT, 0.0 ) ).r - texture2D( normalMap, vNormalMapUv - vec2( hT, 0.0 ) ).r,
-                       texture2D( normalMap, vNormalMapUv + vec2( 0.0, hT ) ).r - texture2D( normalMap, vNormalMapUv - vec2( 0.0, hT ) ).r ) * ( uSlope / ( 2.0 * hT ) );
+      .replace('#include <normal_fragment_maps>', THREE.ShaderChunk.normal_fragment_maps.replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', `
+        vec2 g = ( vec2( texture2D( normalMap, vNormalMapUv ).r, texture2D( uNy, vNormalMapUv ).r ) * 2.0 - 1.0 ) * ${MAP.slopeMax.toFixed(2)};
         vec2 dUv = vNormalMapUv * uDetailRep; const float dT = 1.0 / ${MAP.tile}.0;
         vec2 gd = vec2( texture2D( uDetail, dUv + vec2( dT, 0.0 ) ).r - texture2D( uDetail, dUv - vec2( dT, 0.0 ) ).r,
                         texture2D( uDetail, dUv + vec2( 0.0, dT ) ).r - texture2D( uDetail, dUv - vec2( 0.0, dT ) ).r );
         // fade the micro relief out as its texels shrink below a pixel, so it never shimmers
         float dFade = clamp( 2.0 - 0.75 * ${MAP.tile}.0 * length( fwidth( dUv ) ), 0.0, 1.0 );
-        vec3 mapN = vec3( -( g + gd * uDetailK * dFade ), 1.0 );`)
+        vec3 mapN = vec3( -( g + gd * uDetailK * dFade ), 1.0 );`))
       .replace('#include <lights_physical_pars_fragment>', THREE.ShaderChunk.lights_physical_pars_fragment.replace(
         'reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );',
         `float nlW = dot( geometryNormal, directLight.direction );
@@ -380,11 +378,11 @@ export async function loadHands() {
     if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
     return t;
   });
-  const [l, r, albedo, height, orm, gloveH, pores, leather] = await Promise.all([
+  const [l, r, albedo, nx, ny, orm, gloveNx, gloveNy, pores, leather] = await Promise.all([
     gltf.loadAsync(MODELS + 'hand_left.glb'), gltf.loadAsync(MODELS + 'hand_right.glb'),
-    tex('hand_albedo.webp', true), tex('hand_height.webp'), tex('hand_orm.webp'), tex('hand_glove_h.webp'),
-    tex('hand_pores.webp', false, true), tex('hand_leather.webp', false, true),
+    tex('hand_albedo.webp', true), tex('hand_nx.webp'), tex('hand_ny.webp'), tex('hand_orm.webp'),
+    tex('hand_glove_nx.webp'), tex('hand_glove_ny.webp'), tex('hand_pores.webp', false, true), tex('hand_leather.webp', false, true),
   ]);
-  const T = { albedo, height, orm, gloveH, pores, leather };
+  const T = { albedo, nx, ny, orm, gloveNx, gloveNy, pores, leather };
   return { left: new Hand(l.scene, 'left', T), right: new Hand(r.scene, 'right', T) };
 }
