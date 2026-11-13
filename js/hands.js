@@ -313,12 +313,17 @@ class Hand {
                                   - 0.22 * exp( -pow( ( al + 0.0045 ) / 0.0016, 2.0 ) ); }`);
     };
     const jacket = new THREE.Mesh(jGeo, jMat); this.sleeveMesh = jacket;
-    // three sleeve buttons on the outer back of the sleeve (horn), kissing
-    // A turned horn button: rounded rim, dished face, four sewn holes. Quiet dark horn with a polished face.
+    // Three kissing sleeve buttons: turned horn with a rounded rim, a dished face and four sewn holes (one mesh for
+    // the four holes). Quiet dark horn with a polished face.
     const btnMat = new THREE.MeshPhysicalMaterial({ color: 0x3e2a1c, roughness: 0.32, clearcoat: 0.7, clearcoatRoughness: 0.2 });
     const btnGeo = new THREE.LatheGeometry([[0, 0.0015], [0.0028, 0.0013], [0.0042, 0.0019], [0.0050, 0.0021], [0.0055, 0.0017], [0.0057, 0.0008], [0.0055, 0]].reverse().map(([r, y]) => new THREE.Vector2(r, y)), 32);
-    const holeGeo = new THREE.CircleGeometry(0.00052, 10).rotateX(-Math.PI / 2), holeMat = new THREE.MeshBasicMaterial({ color: 0x120c08 });
-    btnGeo.userData.holes = [[1, 1], [-1, 1], [1, -1], [-1, -1]].map(([x, z]) => new THREE.Vector3(x * 0.0011, 0.00142, z * 0.0011));
+    const holeGeo = new THREE.BufferGeometry(), holeMat = new THREE.MeshBasicMaterial({ color: 0x120c08 });
+    {
+      const disc = new THREE.CircleGeometry(0.00052, 10).rotateX(-Math.PI / 2).toNonIndexed().attributes.position.array, n = disc.length;
+      const pos = new Float32Array(n * 4);
+      [[1, 1], [-1, 1], [1, -1], [-1, -1]].forEach(([x, z], i) => { for (let j = 0; j < n; j += 3) pos.set([disc[j] + x * 0.0011, disc[j + 1] + 0.00142, disc[j + 2] + z * 0.0011], i * n + j); });
+      holeGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    }
     // on the outer side of the sleeve, toward the back: the side a pistol grip turns toward the eye (checked in hip and ADS)
     const bAng = -Math.PI * 0.88;
     for (let k = 0; k < (buttons ? 3 : 0); k++) {
@@ -329,7 +334,7 @@ class Hand {
       btn.position.set(a * c + nx * (folds(ph, y) + 0.0002), y, b * s + nz * (folds(ph, y) + 0.0002));
       btn.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(nx, 0, nz));
       btn.rotateY(0.3 + k * 0.7);
-      for (const hp of btnGeo.userData.holes) { const hole = new THREE.Mesh(holeGeo, holeMat); hole.position.copy(hp); btn.add(hole); }
+      btn.add(new THREE.Mesh(holeGeo, holeMat));
       btn.castShadow = true; jacket.add(btn);
     }
     // The cuff hangs on a pivot at the jacket hem and turns part of the way toward the hand's own axis, so a bent
