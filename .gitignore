@@ -1,0 +1,4 @@
+.impeccable/
+.claude/
+node_modules/
+*.log
