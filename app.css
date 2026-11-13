@@ -93,7 +93,8 @@ body.touch .round { display: flex; }
   text-shadow: 0 1px 6px rgba(0,0,0,.8); pointer-events: none; white-space: nowrap; }
 #tally span { font-variant-numeric: tabular-nums; color: #f3e9d4; }
 #tally i { font-style: normal; opacity: .5; margin: 0 4px; }
-#reload-btn { left: var(--gl); bottom: calc(var(--gb) + 18px); }
+#reload-btn { left: var(--gl); bottom: calc(var(--gb) + 14px); width: 72px; height: 72px; gap: 3px; }
+#reload-btn svg { width: 20px; height: 20px; }
 #reload-btn.pulse { animation: reload-pulse 1.1s ease-in-out infinite; border-color: #f1d897; }
 @keyframes reload-pulse { 50% { background: rgba(241, 216, 151, .4); } }
 body.touch #ammo { right: auto; left: 50%; transform: translateX(-50%); bottom: calc(var(--gb) + 10px); }
