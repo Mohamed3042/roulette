@@ -89,13 +89,13 @@ const GRIP_LOOKS = {
 };
 const MEDAL_LOOKS = { service: [0xb9b2a4, 0.42], stainless: [0xb9b8b4, 0.3], nickel: [0xc9a35c, 0.3] };
 
-function steelMaterial(A, isCase, muzzleZ) {
+function steelMaterial(A, isCase, muzzleZ, isCyl = false) {
   const u = {
     tWear: { value: A.wear }, tScr: { value: A.scratch }, tDet: { value: A.detail },
     uBase: { value: new THREE.Color() }, uPat: { value: new THREE.Color() }, uThin: { value: new THREE.Color() }, uWorn: { value: new THREE.Color() }, uCav: { value: new THREE.Color() },
     uR: { value: new THREE.Vector3() }, uM: { value: new THREE.Vector2() },
     uAmt: { value: new THREE.Vector4() }, uAmt2: { value: new THREE.Vector4() }, uAmt3: { value: new THREE.Vector4(0, muzzleZ, 0, 0) },
-    uAmt4: { value: new THREE.Vector4() }, uRust: { value: new THREE.Color() }, uEnvK: { value: new THREE.Vector3(1, 1, 1) },
+    uAmt4: { value: new THREE.Vector4() }, uRust: { value: new THREE.Color() }, uEnvK: { value: new THREE.Vector3(1, 1, 1) }, uCyl: { value: isCyl ? 1 : 0 },
   };
   const m = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 1, roughness: 0.3, aoMap: A.wear, aoMapIntensity: 0.65, normalMap: A.normal, clearcoat: 0.4, clearcoatRoughness: 0.2 });
   m.normalScale.set(1, -1);
@@ -104,7 +104,7 @@ function steelMaterial(A, isCase, muzzleZ) {
   m.onBeforeCompile = (s) => {
     Object.assign(s.uniforms, u);
     s.vertexShader = 'attribute vec3 aRoot; varying vec3 vLP; varying vec3 vLN; varying vec3 vR;\n' + s.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvLP = position; vLN = normal; vR = aRoot;');
-    s.fragmentShader = `uniform sampler2D tWear, tScr, tDet; uniform vec3 uBase, uPat, uThin, uWorn, uCav, uR; uniform vec2 uM; uniform vec4 uAmt, uAmt2, uAmt3, uAmt4; uniform vec3 uRust;
+    s.fragmentShader = `uniform sampler2D tWear, tScr, tDet; uniform vec3 uBase, uPat, uThin, uWorn, uCav, uR; uniform vec2 uM; uniform vec4 uAmt, uAmt2, uAmt3, uAmt4; uniform vec3 uRust; uniform float uCyl;
 varying vec3 vLP; varying vec3 vLN; varying vec3 vR;
 // 3D value noise in gun space: isotropic, so the patina has no direction and no tile
 float h13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
@@ -159,20 +159,46 @@ float vn(vec3 x) {
   col *= 1.0 + brush * uAmt.w * 0.5;
   col *= mix(1.0, clamp(dt.b / 0.72, 0.0, 1.4), uAmt3.x);                       // the scan's own scuffs and grime
   col = mix(col, uCav, cav);
-  diffuseColor.rgb = col;
   float gRough = mix(uR.x, uR.y, bareE) + pat * 0.2 + speck * 0.08 + rust * 0.3 + scr * 0.06 + brush * uAmt.w * 0.35 + (cSp - 0.5) * 0.06;
   gRough = mix(gRough, dt.r, uAmt2.w);
   gRough = clamp(mix(gRough, uR.z, cav), 0.04, 1.0);
   float gMetal = mix(uM.x, uM.y, max(bareE, uAmt2.z * 0.5)) * mix(1.0, dt.g, 0.6) * (1.0 - rust * 0.8) * (1.0 - pat * 0.3 * uAmt2.x);
-  float gCoat = (1.0 - bareE * 0.7) * (1.0 - cav * 0.5) * (1.0 - pat * 0.6);`)
+  // cylinder rear face: the extractor star, ratchet and the face around them are drawn here, sharp at any distance
+  // (the scanned maps are blurry there). Cylinder space, mm: axis = z, chamber 0 at +y, 14.1 mm off the axis.
+  vec2 cq = vLP.xy * 1000.0; float cr = length(cq);
+  float starZone = uCyl * step(-0.0012, vLP.z) * smoothstep(0.55, 0.8, normalize(vLN).z) * (1.0 - smoothstep(11.0, 11.6, cr));
+  float starAO = 1.0;
+  if (starZone > 0.0) {
+    float seg = 1.0471976, th = atan(cq.x, cq.y);
+    float k = floor(th / seg + 0.5) * seg;
+    float dc = length(cq - 14.1 * vec2(sin(k), cos(k)));                       // to the nearest chamber centre
+    float sd = max(7.6 - dc, cr - 9.25);                                         // < 0 inside the star: arcs round each chamber
+    float fw = max(fwidth(sd), 0.02);
+    float star = 1.0 - smoothstep(-fw, fw, sd);
+    float groove = 1.0 - smoothstep(0.07, 0.07 + fw * 1.5, abs(sd));
+    float hub = 1.0 - smoothstep(4.35 - fw, 4.35 + fw, cr);
+    float machined = max(star, hub);
+    vec3 face = mix(uBase, uPat, 0.55) * (0.85 + 0.3 * cSm);
+    vec3 steelM = uWorn * (0.78 + 0.25 * cSm);
+    vec3 zc = mix(face, steelM, machined);
+    zc *= 1.0 - groove * 0.85;
+    col = mix(col, zc, starZone);
+    gRough = mix(gRough, mix(0.5, 0.36, machined), starZone);
+    gMetal = mix(gMetal, mix(0.5, 0.75, machined), starZone);
+    starAO = 1.0 - groove * 0.8;
+  }
+  diffuseColor.rgb = col;
+  float gCoat = (1.0 - bareE * 0.7) * (1.0 - cav * 0.5) * (1.0 - pat * 0.6) * (1.0 - starZone);`)
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = gRough;')
       .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = gMetal;')
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n  normal = normalize(mix(normal, nonPerturbedNormal, starZone));')
+      .replace('#include <aomap_fragment>', '#include <aomap_fragment>\n  reflectedLight.indirectDiffuse *= mix(1.0, starAO / max(ambientOcclusion, 0.05), starZone);')
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= gCoat;\n#endif')
       // per-look reflection gain and tint (the rooms are warm; scene.environmentIntensity overrides envMapIntensity)
       .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  radiance *= uEnvK; iblIrradiance *= uEnvK;\n#ifdef USE_CLEARCOAT\n  clearcoatRadiance *= uEnvK;\n#endif');
     s.fragmentShader = 'uniform vec3 uEnvK;\n' + s.fragmentShader;
   };
-  m.customProgramCacheKey = () => m.name + '-v6';
+  m.customProgramCacheKey = () => m.name + '-v7';
   return m;
 }
 
@@ -337,7 +363,7 @@ export function createRevolver({ look, finish } = {}) {
     setLook(id) {
       current = STEEL_LOOKS[id] ? id : 'service';
       if (!state.mats) return;
-      applySteelLook(state.mats.steel, STEEL_LOOKS[current]); applySteelLook(state.mats.steelCase, STEEL_LOOKS[current]);
+      for (const k of ['steel', 'steelCase', 'steelCyl']) applySteelLook(state.mats[k], STEEL_LOOKS[current]);
       applyGripLook(state.mats.grip, GRIP_LOOKS[current], state.A, state.stipple);
       const [mc, mr] = MEDAL_LOOKS[current]; state.mats.medal.color.setHex(mc); state.mats.medal.roughness = mr;
     },
@@ -349,13 +375,14 @@ export function createRevolver({ look, finish } = {}) {
     state.A = A; state.stipple = stippleTex();
     const muzzleZ = RAW.muzzle[2] + FIT.pos.z + 0.004; // gun space: the last 4 mm of the barrel is the worn crown
     const steel = steelMaterial(A, false, muzzleZ), steelCase = steelMaterial(A, true, muzzleZ), gripM = gripMaterial(A);
+    const steelCyl = steelMaterial(A, false, muzzleZ, true);
     const medal = new THREE.MeshPhysicalMaterial({ color: 0xc9a35c, metalness: 1, roughness: 0.35, envMapIntensity: 1.3 });
     const brass = new THREE.MeshPhysicalMaterial({ color: 0xe7b062, metalness: 1, roughness: 0.3, roughnessMap: brushTex(), envMapIntensity: 1.3 });
     const head = new THREE.MeshPhysicalMaterial({ map: headstampTex(), metalness: 1, roughness: 0.26, envMapIntensity: 1.6 });
     const lead = new THREE.MeshPhysicalMaterial({ color: 0x55575a, metalness: 0.55, roughness: 0.55 });
-    const primer = new THREE.MeshPhysicalMaterial({ color: 0xc9c3b8, metalness: 1, roughness: 0.24, envMapIntensity: 1.6 });
-    const primerFired = new THREE.MeshPhysicalMaterial({ color: 0x8f8170, metalness: 1, roughness: 0.42, envMapIntensity: 1.3 });
-    state.mats = { steel, steelCase, grip: gripM, medal, primer, primerFired };
+    const primer = new THREE.MeshPhysicalMaterial({ color: 0xb4afa5, metalness: 1, roughness: 0.4 });   // satin nickel cup
+    const primerFired = new THREE.MeshPhysicalMaterial({ color: 0x8f8170, metalness: 1, roughness: 0.46 });
+    state.mats = { steel, steelCase, steelCyl, grip: gripM, medal, primer, primerFired };
     const byName = { steel, steel_case: steelCase, grip: gripM, medallion: medal, brass, brass_head: head, lead, primer };
 
     const holders = { Frame: frame, Grip: grip, Hammer: hammer, Trigger: trigger, Crane: crane, Cylinder: cylinder, Muzzle: muzzle, Gap: gap, RearSight: rearSight, FrontSight: frontSight };
@@ -367,7 +394,9 @@ export function createRevolver({ look, finish } = {}) {
       if (n.parent === A.scene || n.parent?.name === 'Revolver') { h.position.applyMatrix4(FIT_M); h.quaternion.premultiply(FIT_Q); }
       const own = n.isMesh ? [n] : n.children.filter((c) => c.isMesh && !NODES.includes(c.name));
       for (const src of own) {
-        const mesh = new THREE.Mesh(src.geometry, byName[src.material.name] || steel);
+        let mat = byName[src.material.name] || steel;
+        if (n.name === 'Cylinder' && mat === steel) mat = steelCyl;
+        const mesh = new THREE.Mesh(src.geometry, mat);
         mesh.castShadow = mesh.receiveShadow = true;
         if (src !== n) { mesh.position.copy(src.position); mesh.quaternion.copy(src.quaternion); }
         h.add(mesh);
@@ -383,7 +412,7 @@ export function createRevolver({ look, finish } = {}) {
     const rootInv = new THREE.Matrix4(), rel = new THREE.Matrix4(), v = new THREE.Vector3();
     root.updateMatrixWorld(true); rootInv.copy(root.matrixWorld).invert();
     root.traverse((o) => {
-      if (!o.isMesh || (o.material !== steel && o.material !== steelCase) || o.geometry.attributes.aRoot) return;
+      if (!o.isMesh || ![steel, steelCase, steelCyl].includes(o.material) || o.geometry.attributes.aRoot) return;
       rel.multiplyMatrices(rootInv, o.matrixWorld);
       const p = o.geometry.attributes.position, a = new Float32Array(p.count * 3);
       for (let i = 0; i < p.count; i++) v.fromBufferAttribute(p, i).applyMatrix4(rel).toArray(a, i * 3);
