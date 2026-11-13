@@ -2,7 +2,7 @@
 
 Every asset that ships in this repository, and where it comes from:
 
-- Revolver (`assets/models/revolver.glb` and `revolver_*.webp`): modelled and textured procedurally for this app in Blender by `tools/blender/build_revolver.py`. No third-party model or texture. Same licence as this repository's code.
+- Revolver (`assets/models/revolver.glb` and `revolver_*.webp`): based on "Smith & Wesson's 629 Classic .44 Magnum" by Gintoki1234 (https://gintoki1234.itch.io/smith-wessons-629-classic-44-magnum), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Modified for this app by `tools/blender/import_sw629.py`: re-exported as a Draco GLB, split into separately pivoted moving parts (frame, grip, hammer, trigger, crane, cylinder), maker's markings removed from the textures, the textures re-graded and repacked (normal map, a roughness/metalness/luminance map and a baked wear map; the blued, stainless and nickel finishes are built in `js/revolver.js`), the rubber grip re-textured as checkered walnut with a medallion, and new generic cartridges. The original cartridges, speed loader and full-size textures are not included. The scratch map (`revolver_scratch.webp`) is procedural, from `tools/blender/build_revolver.py`. No endorsement by the author or by any manufacturer is implied.
 - Pistol (`assets/models/pistol.glb` and `pistol_*.webp`): modelled and textured procedurally for this app by `tools/blender/build_pistol.py`. No third-party model or texture.
 - Hands: cut from the MakeHuman / MPFB base mesh (CC0), re-rigged in Blender.
 - Paper target, flash, smoke: canvas textures and three.js geometry written for this app.

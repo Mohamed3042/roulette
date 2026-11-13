@@ -19,7 +19,7 @@
 <script type="importmap">{ "imports": { "three": "../vendor/three/three.module.js", "three/addons/": "../vendor/three/addons/" } }</script>
 <script type="module">
 // Preview of js/revolver.js lit like the app's study room.
-// Query: look=service|stainless|nickel  cam=q34|open|sights|grip|side|rear|front|top  open=0..1  fired=0,3  cock=0..1  pull=0..1
+// Query: look=service|stainless|nickel  cam=q34|open|sights|grip|side|right|rear|front|top  open=0..1  fired=0,3  cock=0..1  pull=0..1
 //        spin=<chambers>  dof=<samples>  fstop=<n>  hud=0
 import * as THREE from 'three';
 import { createRevolver, OPEN_ANGLE, STEP, HAMMER_COCK, TRIGGER_PULL } from '../js/revolver.js';
@@ -95,14 +95,15 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const cyl = gun.cylinder.getWorldPosition(V(0, 0, 0));
 const rs = gun.rearSight.getWorldPosition(V(0, 0, 0)), fs = gun.frontSight.getWorldPosition(V(0, 0, 0));
 const CAMS = {
-  q34: { pos: V(-0.36, 0.2, 0.2), at: V(0, 0.012, -0.035), fov: 30 },
-  side: { pos: V(-0.62, 0.0, -0.035), at: V(0, -0.002, -0.035), fov: 24 },
+  q34: { pos: V(-0.44, 0.24, 0.2), at: V(0, 0.008, -0.05), fov: 30 },
+  side: { pos: V(-0.66, 0.0, -0.046), at: V(0, -0.002, -0.046), fov: 26 },
+  right: { pos: V(0.66, 0.0, -0.046), at: V(0, -0.002, -0.046), fov: 26 },
   rear: { pos: V(-0.12, 0.13, 0.32), at: V(0, 0.03, -0.02), fov: 26 },
-  front: { pos: V(0.1, 0.09, -0.5), at: V(0, 0.03, -0.04), fov: 24 },
-  top: { pos: V(0.0, 0.6, -0.04), at: V(0, 0, -0.04), fov: 26, up: V(0, 0, -1) },
+  front: { pos: V(0.1, 0.09, -0.6), at: V(0, 0.03, -0.05), fov: 24 },
+  top: { pos: V(0.0, 0.66, -0.046), at: V(0, 0, -0.046), fov: 26, up: V(0, 0, -1) },
   open: { pos: cyl.clone().add(V(-0.03, 0.022, 0.1)), at: cyl.clone().add(V(0.0, 0.0, 0.0)), fov: 30 },
   sights: { pos: rs.clone().add(V(0, 0, 0.3)), at: fs, fov: 30 },
-  grip: { pos: V(-0.2, 0.03, 0.12), at: V(0, -0.012, 0.05), fov: 26 },
+  grip: { pos: V(-0.22, 0.03, 0.14), at: V(0, -0.022, 0.058), fov: 26 },
 };
 const C = CAMS[camName] || CAMS.q34;
 camera.fov = +(q.get('fov') || C.fov); camera.position.copy(C.pos); if (C.up) camera.up.copy(C.up); camera.lookAt(C.at);
