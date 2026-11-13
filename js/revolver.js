@@ -59,25 +59,27 @@ const RAW = {
 // ---------------------------------------------------------------- looks
 const lin = (hex) => new THREE.Color(hex);
 const STEEL_LOOKS = {
-  // base = intact finish, pat = finish gone grey-brown in patches, thin = finish worn thin on high spots,
-  // worn = bare steel at edges/scratches, cav = grime in recesses. src* = how much of the scanned source maps shows through.
+  // base = intact finish, pat = finish gone grey in cloudy patches (and speckle), thin = finish worn thin on edges,
+  // worn = bare steel where a carried gun wears through, rustC = small rust freckles, cav = grime in recesses.
+  // edge = bare-steel amount at the wear spots, thinAmt = worn-thin amount on the other edges. env = reflection gain/tint
+  // (the rooms are warm). src* = how much of the scanned source maps shows through.
   service: {
-    base: lin(0x14171c), pat: lin(0x403e3b), thin: lin(0x3a3e44), worn: lin(0xb2b0ac), cav: lin(0x0c0a08),
-    rBase: 0.36, rWorn: 0.3, rCav: 0.82, mBase: 0.7, mWorn: 1.0,
-    edge: 1.7, thinAmt: 0.85, scratch: 0.65, brush: 0.05, cavAmt: 0.9, patina: 0.9, grey: 0.22, cc: 0.3, ccR: 0.24, caseAmt: 0.85,
-    srcRough: 0.2, srcLum: 0.55, iri: 0, iriNm: 330,
+    base: lin(0x161b23), pat: lin(0x55575b), thin: lin(0x50535a), worn: lin(0x77767a), cav: lin(0x0a0908), rustC: lin(0x4a2a18),
+    rBase: 0.32, rWorn: 0.42, rCav: 0.82, mBase: 0.8, mWorn: 1.0,
+    edge: 1.0, thinAmt: 0.75, scratch: 0.35, brush: 0.0, cavAmt: 0.85, patina: 0.9, grey: 0.0, speck: 0.6, rust: 0.6, cc: 0.12, ccR: 0.38, caseAmt: 0.85,
+    srcRough: 0.15, srcLum: 0.2, iri: 0, iriNm: 330, env: [1.12, 1.2, 1.34],
   },
   stainless: {
-    base: lin(0xa19f9a), pat: lin(0x9a9893), thin: lin(0xa8a7a2), worn: lin(0xc0bfbb), cav: lin(0x34332f),
+    base: lin(0xa19f9a), pat: lin(0x9a9893), thin: lin(0xa8a7a2), worn: lin(0xc0bfbb), cav: lin(0x34332f), rustC: lin(0x9a9893),
     rBase: 0.36, rWorn: 0.24, rCav: 0.55, mBase: 1.0, mWorn: 1.0,
-    edge: 0.5, thinAmt: 0.1, scratch: 0.2, brush: 0.25, cavAmt: 0.5, patina: 0.15, grey: 0, cc: 0.0, ccR: 0.3, caseAmt: 0.0,
-    srcRough: 0.45, srcLum: 1.0, iri: 0, iriNm: 300,
+    edge: 0.5, thinAmt: 0.1, scratch: 0.2, brush: 0.25, cavAmt: 0.5, patina: 0.15, grey: 0, speck: 0, rust: 0, cc: 0.0, ccR: 0.3, caseAmt: 0.0,
+    srcRough: 0.45, srcLum: 1.0, iri: 0, iriNm: 300, env: [1, 1, 1],
   },
   nickel: {
-    base: lin(0xd0d2d4), pat: lin(0xc2c0bb), thin: lin(0xc8cacc), worn: lin(0xeaebec), cav: lin(0x3a3a3a),
+    base: lin(0xd0d2d4), pat: lin(0xc2c0bb), thin: lin(0xc8cacc), worn: lin(0xeaebec), cav: lin(0x3a3a3a), rustC: lin(0xc2c0bb),
     rBase: 0.2, rWorn: 0.12, rCav: 0.5, mBase: 1.0, mWorn: 1.0,
-    edge: 0.45, thinAmt: 0.25, scratch: 0.28, brush: 0.05, cavAmt: 0.75, patina: 0.3, grey: 0, cc: 0.0, ccR: 0.3, caseAmt: 0.0,
-    srcRough: 0.15, srcLum: 0.45, iri: 0, iriNm: 300,
+    edge: 0.45, thinAmt: 0.25, scratch: 0.28, brush: 0.05, cavAmt: 0.75, patina: 0.3, grey: 0, speck: 0, rust: 0, cc: 0.0, ccR: 0.3, caseAmt: 0.0,
+    srcRough: 0.15, srcLum: 0.45, iri: 0, iriNm: 300, env: [1, 1, 1],
   },
 };
 const GRIP_LOOKS = {
@@ -93,6 +95,7 @@ function steelMaterial(A, isCase, muzzleZ) {
     uBase: { value: new THREE.Color() }, uPat: { value: new THREE.Color() }, uThin: { value: new THREE.Color() }, uWorn: { value: new THREE.Color() }, uCav: { value: new THREE.Color() },
     uR: { value: new THREE.Vector3() }, uM: { value: new THREE.Vector2() },
     uAmt: { value: new THREE.Vector4() }, uAmt2: { value: new THREE.Vector4() }, uAmt3: { value: new THREE.Vector4(0, muzzleZ, 0, 0) },
+    uAmt4: { value: new THREE.Vector4() }, uRust: { value: new THREE.Color() }, uEnvK: { value: new THREE.Vector3(1, 1, 1) },
   };
   const m = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 1, roughness: 0.3, aoMap: A.wear, aoMapIntensity: 0.65, normalMap: A.normal, clearcoat: 0.4, clearcoatRoughness: 0.2 });
   m.normalScale.set(1, -1);
@@ -100,52 +103,76 @@ function steelMaterial(A, isCase, muzzleZ) {
   m.userData.u = u;
   m.onBeforeCompile = (s) => {
     Object.assign(s.uniforms, u);
-    s.vertexShader = 'varying vec3 vLP; varying vec3 vLN;\n' + s.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvLP = position; vLN = normal;');
-    s.fragmentShader = `uniform sampler2D tWear, tScr, tDet; uniform vec3 uBase, uPat, uThin, uWorn, uCav, uR; uniform vec2 uM; uniform vec4 uAmt, uAmt2, uAmt3;
-varying vec3 vLP; varying vec3 vLN;
+    s.vertexShader = 'attribute vec3 aRoot; varying vec3 vLP; varying vec3 vLN; varying vec3 vR;\n' + s.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvLP = position; vLN = normal; vR = aRoot;');
+    s.fragmentShader = `uniform sampler2D tWear, tScr, tDet; uniform vec3 uBase, uPat, uThin, uWorn, uCav, uR; uniform vec2 uM; uniform vec4 uAmt, uAmt2, uAmt3, uAmt4; uniform vec3 uRust;
+varying vec3 vLP; varying vec3 vLN; varying vec3 vR;
+// 3D value noise in gun space: isotropic, so the patina has no direction and no tile
+float h13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+float vn(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(h13(i), h13(i + vec3(1, 0, 0)), f.x), mix(h13(i + vec3(0, 1, 0)), h13(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(h13(i + vec3(0, 0, 1)), h13(i + vec3(1, 0, 1)), f.x), mix(h13(i + vec3(0, 1, 1)), h13(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
 ` + s.fragmentShader
       .replace('#include <map_fragment>', `
   vec3 wr = texture2D(tWear, vAoMapUv).rgb;            // r = ao, g = cavity, b = convex edge (baked on the model)
   vec3 dt = texture2D(tDet, vAoMapUv).rgb;             // r = source roughness, g = source metalness, b = source albedo luminance
   vec3 an = pow(abs(normalize(vLN)), vec3(4.0)); an /= (an.x + an.y + an.z);
-  vec3 P = vLP * 18.0;                                 // 55 mm tile, streaks run along the gun (z)
+  vec3 P = vR * 18.0;                                  // 55 mm tile
   vec4 sc = texture2D(tScr, P.zy) * an.x + texture2D(tScr, P.zx) * an.y + texture2D(tScr, P.xy) * an.z;
-  vec4 sc2 = texture2D(tScr, P.zy * 0.31 + 0.37) * an.x + texture2D(tScr, P.zx * 0.31 + 0.37) * an.y + texture2D(tScr, P.xy * 0.31 + 0.37) * an.z;
-  vec4 sc3 = texture2D(tScr, P.zy * 0.11 + 0.71) * an.x + texture2D(tScr, P.zx * 0.11 + 0.71) * an.y + texture2D(tScr, P.xy * 0.11 + 0.71) * an.z;
-  // wear follows the baked convex-edge mask with a sharp threshold; a little fine noise breaks the boundary up
-  float e = wr.b * uAmt.x;
-  e += step(vLP.z, uAmt3.y) * 0.6;                                               // muzzle face and crown
-  float jit = (sc.b - 0.5) * 0.22 + (sc.r - 0.5) * 0.10;
-  float edgeW = smoothstep(0.46, 0.54, e + jit);
-  float halo = smoothstep(0.16, 0.42, e + jit * 0.6) * uAmt.y;                    // finish worn thin next to the edges
-  float scr = smoothstep(0.55, 0.9, sc.r) * uAmt.z * (0.35 + 0.65 * smoothstep(0.1, 0.5, e));
-  float fine = smoothstep(0.62, 0.95, sc.g) * uAmt.z * 0.55;
+  vec3 Q = vR + vec3(0.37, 0.11, 0.73);
+  float cBig = vn(Q * 22.0) * 0.65 + vn(Q * 51.0) * 0.35;           // ~4 cm clouds
+  float cMid = vn(Q * 70.0) * 0.6 + vn(Q * 150.0) * 0.4;            // ~1 cm
+  float cSm = vn(Q * 260.0) * 0.6 + vn(Q * 560.0) * 0.4;            // ~3 mm
+  float cSp = vn(Q * 1100.0) * 0.6 + vn(Q * 2300.0) * 0.4;          // sub-mm speckle
+  // where a carried gun really wears bare (gun space, metres): muzzle + front of barrel/underlug, cylinder front edge,
+  // front sight top, top strap corners, bottom of the trigger guard, hammer spur
+  float loc = smoothstep(-0.150, -0.195, vR.z);
+  loc = max(loc, exp(-pow((vR.z + 0.0362) / 0.0035, 2.0)) * step(0.004, vR.y));
+  loc = max(loc, smoothstep(0.056, 0.061, vR.y) * step(vR.z, 0.03));
+  loc = max(loc, smoothstep(-0.031, -0.038, vR.y));
+  loc = max(loc, smoothstep(0.036, 0.044, vR.y) * step(0.5, uAmt2.z));
+  float crown = step(vR.z, uAmt3.y);
+  // edges: the finish is only worn thin, and broken up along their length by low-frequency noise
+  float e = wr.b;
+  float brk = smoothstep(0.42, 0.62, cSm * 0.7 + cMid * 0.3);
+  float jit = (cSp - 0.5) * 0.25 + (sc.r - 0.5) * 0.15;
+  float thinE = smoothstep(0.2, 0.45, e + jit * 0.6) * brk * uAmt.y;
+  float bareE = clamp(smoothstep(0.3, 0.5, e * (0.6 + 0.4 * brk) + loc * 0.4 * cMid + jit) * loc * uAmt.x + crown * smoothstep(0.3, 0.6, cSp + 0.2), 0.0, 1.0);
+  float scr = smoothstep(0.6, 0.92, sc.r) * uAmt.z;                               // a few fine handling scratches
   float cav = smoothstep(0.08, 0.55, wr.g) * uAmt2.y;
   float brush = sc.g - 0.5;
-  // patina: soft, uneven patches where the bluing has gone grey-brown (more on the exposed high spots)
-  float pn = sc3.b * 0.6 + sc2.b * 0.4 - (1.0 - wr.r) * 0.25 + wr.b * 0.15;
-  float pat = clamp(smoothstep(0.44, 0.62, pn) * uAmt2.x + uAmt3.z, 0.0, 1.0);
-  vec3 col = mix(uBase, uPat, pat);
-  col = mix(col, uThin, clamp(halo + fine * 0.8, 0.0, 1.0) * (1.0 - pat * 0.5));
-  float wornT = clamp(edgeW + scr * 0.6, 0.0, 1.0);
-  col = mix(col, uWorn, wornT);
+  // patina: cloudy isotropic mottling (finish gone grey), fine speckle, and a few small rust freckles
+  float pn = cBig * 0.5 + cMid * 0.3 + cSm * 0.2 - (1.0 - wr.r) * 0.15;
+  float pat = clamp((smoothstep(0.44, 0.56, pn) * 0.45 + smoothstep(0.54, 0.66, pn) * 0.55) * uAmt2.x + uAmt3.z, 0.0, 1.0);
+  float speck = smoothstep(0.62, 0.72, cSm * 0.8 + cSp * 0.2) * smoothstep(0.35, 0.55, cBig) * uAmt4.x;
+  float rust = smoothstep(0.7, 0.76, cSm * 0.7 + cMid * 0.3) * smoothstep(0.5, 0.6, cBig) * uAmt4.y;
+  vec3 col = mix(uBase, uPat * (0.8 + 0.4 * cSm), pat);
+  col = mix(col, uPat, speck * 0.6);
+  col = mix(col, uThin, clamp(thinE, 0.0, 1.0));
+  col = mix(col, uThin, scr * 0.7);
+  col = mix(col, uRust, rust);
+  col = mix(col, uWorn, bareE);
   // case colours (hammer, trigger): mottled blue / straw / purple film over the steel
-  vec3 caseC = mix(mix(vec3(0.030, 0.040, 0.075), vec3(0.120, 0.085, 0.040), smoothstep(0.5, 0.68, sc2.b)), vec3(0.060, 0.040, 0.075), smoothstep(0.4, 0.6, sc.b) * 0.6);
-  col = mix(col, mix(mix(uBase, caseC, 0.55), uWorn, wornT * 0.8), uAmt2.z);
+  vec3 caseC = mix(mix(vec3(0.030, 0.040, 0.075), vec3(0.120, 0.085, 0.040), smoothstep(0.5, 0.68, cMid)), vec3(0.060, 0.040, 0.075), smoothstep(0.4, 0.6, sc.b) * 0.6);
+  col = mix(col, mix(mix(uBase, caseC, 0.55), uWorn, bareE * 0.8), uAmt2.z);
   col *= 1.0 + brush * uAmt.w * 0.5;
   col *= mix(1.0, clamp(dt.b / 0.72, 0.0, 1.4), uAmt3.x);                       // the scan's own scuffs and grime
   col = mix(col, uCav, cav);
   diffuseColor.rgb = col;
-  float gRough = mix(uR.x, uR.y, wornT) + pat * 0.1 + (scr + fine) * 0.08 + brush * uAmt.w * 0.35 + (sc2.g - 0.5) * 0.05;
+  float gRough = mix(uR.x, uR.y, bareE) + pat * 0.2 + speck * 0.08 + rust * 0.3 + scr * 0.06 + brush * uAmt.w * 0.35 + (cSp - 0.5) * 0.06;
   gRough = mix(gRough, dt.r, uAmt2.w);
   gRough = clamp(mix(gRough, uR.z, cav), 0.04, 1.0);
-  float gMetal = mix(uM.x, uM.y, max(wornT, uAmt2.z * 0.5)) * mix(1.0, dt.g, 0.6);
-  float gCoat = (1.0 - wornT * 0.6) * (1.0 - cav * 0.5) * (1.0 - pat * 0.6);`)
+  float gMetal = mix(uM.x, uM.y, max(bareE, uAmt2.z * 0.5)) * mix(1.0, dt.g, 0.6) * (1.0 - rust * 0.8) * (1.0 - pat * 0.3 * uAmt2.x);
+  float gCoat = (1.0 - bareE * 0.7) * (1.0 - cav * 0.5) * (1.0 - pat * 0.6);`)
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = gRough;')
       .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = gMetal;')
-      .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= gCoat;\n#endif');
+      .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= gCoat;\n#endif')
+      // per-look reflection gain and tint (the rooms are warm; scene.environmentIntensity overrides envMapIntensity)
+      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  radiance *= uEnvK; iblIrradiance *= uEnvK;\n#ifdef USE_CLEARCOAT\n  clearcoatRadiance *= uEnvK;\n#endif');
+    s.fragmentShader = 'uniform vec3 uEnvK;\n' + s.fragmentShader;
   };
-  m.customProgramCacheKey = () => m.name + '-v5';
+  m.customProgramCacheKey = () => m.name + '-v6';
   return m;
 }
 
@@ -156,6 +183,8 @@ function applySteelLook(m, L) {
   u.uAmt.value.set(L.edge, L.thinAmt, L.scratch, L.brush);
   u.uAmt2.value.set(L.patina, L.cavAmt, m.name === 'steel_case' ? L.caseAmt : 0, L.srcRough);
   u.uAmt3.value.x = L.srcLum; u.uAmt3.value.z = L.grey;
+  u.uAmt4.value.set(L.speck, L.rust, 0, 0); u.uRust.value.copy(L.rustC);
+  u.uEnvK.value.fromArray(L.env);
   m.clearcoat = L.cc; m.clearcoatRoughness = L.ccR;
   // blued steel is a thin oxide film: iridescence tints its reflections blue
   m.iridescence = L.iri; m.iridescenceIOR = 2.0; m.iridescenceThicknessRange = [L.iriNm * 0.8, L.iriNm];
@@ -318,7 +347,7 @@ export function createRevolver({ look, finish } = {}) {
 
   api.ready = loadAssets().then((A) => {
     state.A = A; state.stipple = stippleTex();
-    const muzzleZ = RAW.muzzle[2] + 0.004; // frame-local: the last 4 mm of the barrel is the worn crown
+    const muzzleZ = RAW.muzzle[2] + FIT.pos.z + 0.004; // gun space: the last 4 mm of the barrel is the worn crown
     const steel = steelMaterial(A, false, muzzleZ), steelCase = steelMaterial(A, true, muzzleZ), gripM = gripMaterial(A);
     const medal = new THREE.MeshPhysicalMaterial({ color: 0xc9a35c, metalness: 1, roughness: 0.35, envMapIntensity: 1.3 });
     const brass = new THREE.MeshPhysicalMaterial({ color: 0xe7b062, metalness: 1, roughness: 0.3, roughnessMap: brushTex(), envMapIntensity: 1.3 });
@@ -349,6 +378,16 @@ export function createRevolver({ look, finish } = {}) {
           state.primerMeshes[i] = mesh;
         }
       }
+    });
+    // steel meshes carry their rest-pose position in gun space, so wear and patina sit at fixed places on the gun
+    const rootInv = new THREE.Matrix4(), rel = new THREE.Matrix4(), v = new THREE.Vector3();
+    root.updateMatrixWorld(true); rootInv.copy(root.matrixWorld).invert();
+    root.traverse((o) => {
+      if (!o.isMesh || (o.material !== steel && o.material !== steelCase) || o.geometry.attributes.aRoot) return;
+      rel.multiplyMatrices(rootInv, o.matrixWorld);
+      const p = o.geometry.attributes.position, a = new Float32Array(p.count * 3);
+      for (let i = 0; i < p.count; i++) v.fromBufferAttribute(p, i).applyMatrix4(rel).toArray(a, i * 3);
+      o.geometry.setAttribute('aRoot', new THREE.BufferAttribute(a, 3));
     });
     dims.MUZZLE_Z = muzzle.position.z; dims.BORE_Y = muzzle.position.y;
     api.setLook(current);
