@@ -343,7 +343,7 @@ class Hand {
     if (!this.sleeve) return;
     const mw = this.wrist.matrixWorld, w = this.wrist.getWorldPosition(this._v);
     // the forearm runs between the elbow line and the hand's own axis (wrist +Z): a real wrist bends, but not that far
-    const dir = this._z.copy(elbow).sub(w).normalize().multiplyScalar(0.62).add(new THREE.Vector3(0, 0, 1).transformDirection(mw).multiplyScalar(0.38)).normalize();
+    const dir = this._z.copy(elbow).sub(w).normalize().multiplyScalar(0.7).add(new THREE.Vector3(0, 0, 1).transformDirection(mw).multiplyScalar(0.3)).normalize();
     // roll: the wrist's across axis (+X), kept square to the forearm
     const x = this._x.set(1, 0, 0).transformDirection(mw); x.addScaledVector(dir, -x.dot(dir)).normalize();
     const z = new THREE.Vector3().crossVectors(x, dir);
