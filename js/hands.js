@@ -194,7 +194,7 @@ const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a
 
 // Sleeve layout along the arm, in metres from the cuff edge (y = 0), which sits CUFF_AT up the arm from the wrist joint.
 const CUFF_AT = -0.011;          // the wrist joint is ~2 cm up the forearm from the wrist crease; the cuff ends just past it
-const CUFF = { a: 0.0338, b: 0.0258, off: 0.0015 };    // shirt cuff semi-axes (across, back-to-palm); centre toward the palm
+const CUFF = { a: 0.0338, b: 0.027, off: 0.0006 };    // shirt cuff semi-axes (across, back-to-palm); centre toward the palm
 const HEM_Y = 0.0135;            // jacket hem: 13.5 mm of shirt cuff shows
 const JACKET = { a0: 0.0378, b0: 0.0302, a1: 0.044, b1: 0.037, len: 0.72 };
 
@@ -211,6 +211,19 @@ class Hand {
     const g = this.mesh.geometry, y = g.attributes.position, idx = g.index.array, cut = this.wrist.position.y + 0.02, keep = [];
     for (let i = 0; i < idx.length; i += 3) if (y.getY(idx[i]) <= cut || y.getY(idx[i + 1]) <= cut || y.getY(idx[i + 2]) <= cut) keep.push(idx[i], idx[i + 1], idx[i + 2]);
     g.setIndex(keep);
+    // Slim the forearm stub where the cuff covers it (it is never seen there), so a bent wrist cannot push skin through
+    // the cuff: from the cuff edge up the arm the skin is drawn in toward the wrist axis, up to 30 %.
+    {
+      const qi = this.wrist.quaternion.clone().invert(), wp = this.wrist.position, v = new THREE.Vector3();
+      for (let i = 0; i < y.count; i++) {
+        v.fromBufferAttribute(y, i).sub(wp).applyQuaternion(qi);
+        const t = Math.min(1, Math.max(0, (v.z + 0.01) / 0.024)), k = 1 - 0.3 * t * t * (3 - 2 * t);
+        if (k > 0.999) continue;
+        v.x *= k; v.y = (v.y + 0.0016) * k - 0.0016;
+        v.applyQuaternion(this.wrist.quaternion).add(wp); y.setXYZ(i, v.x, v.y, v.z);
+      }
+      y.needsUpdate = true;
+    }
     this.chains = {};
     const build = (key, prefix, segs) => {
       const bones = segs.map((s) => bone(`${prefix}-${s}`));
@@ -252,7 +265,7 @@ class Hand {
   // Forearm (shirt cuff + jacket sleeve) lives in world space and is aimed from the wrist to an elbow point each
   // frame, because the real wrist bends; it rolls with the wrist so the oval keeps to the forearm. The watch rides on
   // the hand's wrist frame. Sleeve-local axes: +Y up the arm, +X the wrist's across axis, +Z toward the palm.
-  dress({ sleeve, cuff, watch }) {
+  dress({ sleeve, cuff, watch, buttons = true }) {
     if (this.dressing) this.group.children[0].remove(this.dressing);
     this.sleeve ||= new THREE.Group();
     this.sleeve.traverse((o) => { if (o.isMesh && o !== this.cap) { o.geometry.dispose(); o.material.map?.dispose(); o.material.dispose(); } });
@@ -260,7 +273,7 @@ class Hand {
     const right = this.side === 'right';
     // On the watch hand the cuff stops a little higher, just above the watch.
     this.cuffAt = watch ? -0.002 : CUFF_AT;
-    const cuffProf = hemProfile(0, 0.0011, 0.06, 0.018, 10);
+    const cuffProf = hemProfile(0, 0.0011, HEM_Y + 0.022, 0.018, 10);
     const cuffGeo = tubeGeometry({ prof: cuffProf, A: () => CUFF.a, B: () => CUFF.b, seg: 72, offZ: CUFF.off, uRep: Math.round((2 * Math.PI * 0.029) / (OXFORD_MM / 1000)), vScale: 1000 / OXFORD_MM });
     const cuffMat = new THREE.MeshPhysicalMaterial({ color: cuff, roughness: 0.82, sheen: 0.5, sheenRoughness: 0.6, sheenColor: new THREE.Color(cuff).multiplyScalar(0.9), normalMap: oxfordNormal(), normalScale: new THREE.Vector2(0.35, 0.35), side: THREE.DoubleSide });
     // topstitching 5 mm from the cuff edge: a fine darker line in the cuff's own colour
@@ -290,7 +303,7 @@ class Hand {
     const btnGeo = new THREE.CylinderGeometry(0.0058, 0.0056, 0.0024, 28);
     // between the back of the forearm (-Z) and its little-finger side (+X on the right wrist, -X on the left)
     const bAng = -Math.PI * 0.3;
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < (buttons ? 3 : 0); k++) {
       const y = HEM_Y + 0.03 + k * 0.0112, a = J.a0 + (J.a1 - J.a0) * ramp(y), b = J.b0 + (J.b1 - J.b0) * ramp(y);
       const ph = right ? bAng : -Math.PI - bAng, c = Math.cos(ph), s = Math.sin(ph);
       let nx = c / a, nz = s / b; const l = Math.hypot(nx, nz); nx /= l; nz /= l;
@@ -299,17 +312,22 @@ class Hand {
       btn.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(nx, 0, nz));
       btn.castShadow = true; jacket.add(btn);
     }
-    for (const m of [jacket, cuffMesh]) { m.castShadow = m.receiveShadow = true; this.sleeve.add(m); }
+    // The cuff hangs on a pivot at the jacket hem and turns part of the way toward the hand's own axis, so a bent
+    // wrist stays inside it (aimSleeve sets the turn).
+    const pivot = new THREE.Group(); pivot.position.y = HEM_Y; this.cuffPivot = pivot;
+    cuffMesh.position.y = -HEM_Y; pivot.add(cuffMesh);
+    for (const m of [jacket, cuffMesh]) { m.castShadow = m.receiveShadow = true; }
+    this.sleeve.add(jacket, pivot);
     // A dark skin disc just inside the cuff closes the hand mesh's open wrist, which can show when looking down the sights.
     const cap = new THREE.Mesh(new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2).scale(CUFF.a - 0.003, 1, CUFF.b - 0.003).translate(0, 0.012, CUFF.off),
       this.capMat ||= new THREE.MeshStandardMaterial({ color: 0x3a2218, roughness: 0.8, side: THREE.DoubleSide }));
-    this.sleeve.add(cap); this.cap = cap;
+    cap.position.y = -HEM_Y; pivot.add(cap); this.cap = cap;
     // The watch rides on the wrist bone's frame (X across, Y back of the hand, Z up the arm), on the back of the wrist
     // just past the cuff, 12 o'clock toward the fingers.
     const d = new THREE.Group(); d.position.copy(this.wrist.position); d.quaternion.copy(this.wrist.quaternion);
     if (watch) {
       const z = -0.013;
-      const strap = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.017, 96, 1, true).rotateX(Math.PI / 2).scale(0.0309, 0.0199, 1),
+      const strap = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.017, 96, 1, true).rotateX(Math.PI / 2).scale(0.0301, 0.0193, 1),
         new THREE.MeshPhysicalMaterial({ color: 0x3b2316, roughness: 0.55, clearcoat: 0.2, side: THREE.DoubleSide }));
       strap.position.set(0, -0.0016, z); d.add(strap);
       const caseG = new THREE.Group(); caseG.position.set(0, 0.0215, z); d.add(caseG);
@@ -324,7 +342,8 @@ class Hand {
   aimSleeve(elbow) {
     if (!this.sleeve) return;
     const mw = this.wrist.matrixWorld, w = this.wrist.getWorldPosition(this._v);
-    const dir = this._z.copy(elbow).sub(w).normalize();
+    // the forearm runs between the elbow line and the hand's own axis (wrist +Z): a real wrist bends, but not that far
+    const dir = this._z.copy(elbow).sub(w).normalize().multiplyScalar(0.62).add(new THREE.Vector3(0, 0, 1).transformDirection(mw).multiplyScalar(0.38)).normalize();
     // roll: the wrist's across axis (+X), kept square to the forearm
     const x = this._x.set(1, 0, 0).transformDirection(mw); x.addScaledVector(dir, -x.dot(dir)).normalize();
     const z = new THREE.Vector3().crossVectors(x, dir);
@@ -334,6 +353,12 @@ class Hand {
     this.sleeve.quaternion.setFromRotationMatrix(this._m);
     this.sleeve.scale.set(1, 1, palm.dot(z) < 0 ? -1 : 1);
     this.sleeve.position.copy(w).addScaledVector(dir, this.cuffAt ?? CUFF_AT);
+    // turn the cuff halfway toward the hand's forearm axis (wrist +Z), at most 8 degrees
+    const hz = new THREE.Vector3(0, 0, 1).transformDirection(mw);
+    const loc = new THREE.Vector3(hz.dot(x), hz.dot(dir), hz.dot(z) * this.sleeve.scale.z).normalize();
+    const full = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), loc);
+    const ang = 2 * Math.acos(Math.min(1, Math.abs(full.w)));
+    this.cuffPivot.quaternion.identity().slerp(full, ang > 1e-4 ? Math.min(0.5, 0.14 / ang) : 0);
   }
 
   setSkin(name) {
